@@ -54,8 +54,13 @@ jobs:
         if: matrix.xcode == '26.0.1'
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lindo-screens"
           tools/snap.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/snapshots.log"
           swift tools/check-layout.swift /tmp/Lindo-shots/*-layout.json 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/layout.log"
+          mv /tmp/Lindo-shots "$RUNNER_TEMP/lindo-screens/standard"
+          APP_SNAPSHOT_SIZE=compact tools/snap.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/snapshots-compact.log"
+          swift tools/check-layout.swift /tmp/Lindo-shots/*-layout.json 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/layout-compact.log"
+          mv /tmp/Lindo-shots "$RUNNER_TEMP/lindo-screens/compact"
       - name: Repeat adversarial and concurrency tests
         run: |
           set -euo pipefail
@@ -82,5 +87,7 @@ jobs:
             ${{ runner.temp }}/lindo-evidence/export.json
             ${{ runner.temp }}/lindo-stability/*.json
             ${{ runner.temp }}/lindo-stability/*.log
+            ${{ runner.temp }}/lindo-screens/**/*.png
+            ${{ runner.temp }}/lindo-screens/**/*-layout.json
             /tmp/Lindo-shots/*.png
             /tmp/Lindo-shots/*-layout.json
