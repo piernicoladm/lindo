@@ -19,8 +19,12 @@ Nessun elemento viene preselezionato. Prima del Cestino vedi l'elenco preciso e 
 Servono un Mac Apple Silicon, macOS 26 e Swift 6.2 o successivo. Non ci sono dipendenze esterne. Con Apple Command Line Tools oppure Xcode installato:
 
 ```sh
+git clone https://github.com/piernicoladm/lindo.git
+cd lindo
 ./build.sh --open
 ```
+
+Puoi anche scegliere **Code → Download ZIP** nella pagina del repository, estrarre l'archivio e aprire il terminale nella cartella estratta prima di eseguire `./build.sh --open`.
 
 Il comando prepara una build locale ad hoc e apre la copia in staging. Non sostituisce un'installazione esistente. La posizione della `.app` viene stampata nel terminale; i prodotti di build restano in `~/Library/Developer/Lindo/`.
 

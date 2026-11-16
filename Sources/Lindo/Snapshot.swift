@@ -50,6 +50,7 @@ enum Snapshot {
                 model.reviewSelection()
                 try? await Task.sleep(for: .milliseconds(500))
                 await capture("\(directory)/duplicate-confirmation-\(mode).png")
+                await captureConfirmationSheet("\(directory)/duplicate-confirmation-\(mode)-sheet.png")
                 model.showConfirmation = false
                 model.selected = []
                 if let group = model.duplicateGroups.first, let copy = group.files.first(where: { !model.isKeeper($0.id) }) {
@@ -57,6 +58,7 @@ enum Snapshot {
                     model.reviewSelection()
                     try? await Task.sleep(for: .milliseconds(500))
                     await capture("\(directory)/duplicate-partial-confirmation-\(mode).png")
+                    await captureConfirmationSheet("\(directory)/duplicate-partial-confirmation-\(mode)-sheet.png")
                     model.showConfirmation = false
                     model.cleaning = true
                     try? await Task.sleep(for: .milliseconds(400))
@@ -81,7 +83,9 @@ enum Snapshot {
                 model.reviewSelection()
                 try? await Task.sleep(for: .milliseconds(500))
                 await capture("\(directory)/confirmation-\(mode).png")
+                await captureConfirmationSheet("\(directory)/confirmation-\(mode)-sheet.png")
                 model.showConfirmation = false
+                await captureSyncReviewStates(model: model, directory: directory, mode: mode)
                 model.selected = []
                 for page in [SidebarItem.cleanup, .duplicates, .applications] {
                     model.sidebar = page
@@ -245,7 +249,71 @@ enum Snapshot {
         model.pageChanged()
     }
 
-    private static func capture(_ path: String, window supplied: NSWindow? = nil, probeAreas: Set<String>? = nil) async {
+    private static func captureSyncReviewStates(model: AppModel, directory: String, mode: String) async {
+        guard model.isSample, model.sidebar == .largeFiles, !model.reviewItems.isEmpty else {
+            captureFailures += 1
+            log("SNAPSHOT sync review requires the existing synthetic large-file confirmation")
+            return
+        }
+        let savedItems = model.items[.largeFiles]
+        let savedSelected = model.selected, savedQuery = model.query
+        let savedReviewIDs = model.reviewItems.map(\.id), savedSyncStatus = model.reviewSyncStatus
+        let savedConfirmation = model.showConfirmation
+        model.showConfirmation = false
+        try? await Task.sleep(for: .milliseconds(300))
+
+        let states: [(name: String, status: FileSyncStatus, path: String)] = [
+            ("synced", .synced, "/Users/demo/Library/CloudStorage/ExampleProvider/Condivisi/Progetto/Presentazione finale.pdf"),
+            ("unknown", .unknown, "/Users/demo/Documents/Progetto/Materiali da verificare/Presentazione finale.pdf")
+        ]
+        for state in states {
+            let files = [
+                ScanItem(id: "review-local", url: URL(fileURLWithPath: "/Users/demo/Downloads/Archivio progetto.zip"),
+                         title: "Archivio progetto.zip", bytes: 128_000_000, category: .largeFiles, syncStatus: .local),
+                ScanItem(id: "review-\(state.name)", url: URL(fileURLWithPath: state.path),
+                         title: "Presentazione finale.pdf", bytes: 64_000_000, category: .largeFiles, syncStatus: state.status)
+            ]
+            model.items[.largeFiles] = files
+            model.selected = Set(files.map(\.id))
+            model.query = ""
+            model.reviewSelection()
+            if !model.showConfirmation || model.reviewSyncStatus != state.status {
+                captureFailures += 1
+                log("SNAPSHOT incorrect \(state.name) review state")
+            } else {
+                try? await Task.sleep(for: .milliseconds(500))
+                await captureConfirmationSheet("\(directory)/confirmation-\(state.name)-\(mode)-sheet.png")
+            }
+            model.showConfirmation = false
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+
+        model.items[.largeFiles] = savedItems
+        model.selected = savedSelected
+        model.query = savedQuery
+        // Rebuild the original frozen review, including its privately stored sync summary.
+        model.reviewSelection()
+        model.showConfirmation = savedConfirmation
+        if model.reviewItems.map(\.id) != savedReviewIDs || model.reviewSyncStatus != savedSyncStatus {
+            captureFailures += 1
+            log("SNAPSHOT failed to restore the original review after sync fixtures")
+        }
+    }
+
+    private static func captureConfirmationSheet(_ path: String) async {
+        guard let window = NSApp.windows.first(where: { !$0.isSheet && $0.attachedSheet != nil }),
+              let sheet = window.attachedSheet else {
+            captureFailures += 1
+            log("SNAPSHOT missing attached confirmation sheet: \(path)")
+            return
+        }
+        // ConfirmationView has no geometry probes. Capture the actual sheet, including
+        // the AppKit fallback, without emitting an empty layout file that looks verified.
+        await capture(path, window: sheet, writeLayout: false)
+    }
+
+    private static func capture(_ path: String, window supplied: NSWindow? = nil, probeAreas: Set<String>? = nil,
+                                writeLayout: Bool = true) async {
         guard let window = supplied ?? NSApp.windows.first(where: { $0.canBecomeMain && !$0.isSheet }) else {
             log("SNAPSHOT missing window")
             captureFailures += 1
@@ -273,10 +341,12 @@ enum Snapshot {
             catch { log("SNAPSHOT cannot replace old image: \(path)"); captureFailures += 1; return }
         }
         // Auxiliary windows share the probe registry, but never the viewport.
-        let mainAreas = Set(GridProbes.shared.probes.values.map(\.area))
-            .subtracting(["settings", "folder-browser"])
-        let areas = probeAreas ?? mainAreas
-        GridProbes.shared.write(to: path.replacingOccurrences(of: ".png", with: "-layout.json"), window: window.frame.size, areas: areas)
+        if writeLayout {
+            let mainAreas = Set(GridProbes.shared.probes.values.map(\.area))
+                .subtracting(["settings", "folder-browser"])
+            let areas = probeAreas ?? mainAreas
+            GridProbes.shared.write(to: path.replacingOccurrences(of: ".png", with: "-layout.json"), window: window.frame.size, areas: areas)
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = ["-x", "-o", "-l", String(window.windowNumber), path]

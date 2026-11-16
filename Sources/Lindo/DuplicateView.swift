@@ -121,12 +121,12 @@ struct DuplicateView: View {
                          ? "Prima i gruppi con più byte logici nelle copie extra."
                          : "Ordine del primo percorso di ogni gruppo.")
                         .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2)
                     Spacer(minLength: 0)
                 }
                 Text("La copia protetta iniziale segue l’ordine dei percorsi. Puoi cambiarla: Lindo non identifica un originale.")
                     .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
                 if model.isScanningCurrentPage {
                     Text("Risultati dell’analisi precedente. Il nuovo confronto è in corso.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -157,10 +157,13 @@ struct DuplicateView: View {
                             }
                         }
                     }
-                }.scrollBounceBehavior(.basedOnSize)
+                }
+                .frame(minHeight: 0, maxHeight: .infinity)
+                .scrollBounceBehavior(.basedOnSize)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Let the list shrink within the page so the selection footer remains visible.
+        .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
     }
 

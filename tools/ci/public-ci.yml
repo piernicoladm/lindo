@@ -54,8 +54,13 @@ jobs:
         if: matrix.xcode == '26.0.1'
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lindo-screens"
           tools/snap.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/snapshots.log"
           swift tools/check-layout.swift /tmp/Lindo-shots/*-layout.json 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/layout.log"
+          mv /tmp/Lindo-shots "$RUNNER_TEMP/lindo-screens/standard"
+          APP_SNAPSHOT_SIZE=compact tools/snap.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/snapshots-compact.log"
+          swift tools/check-layout.swift /tmp/Lindo-shots/*-layout.json 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/layout-compact.log"
+          mv /tmp/Lindo-shots "$RUNNER_TEMP/lindo-screens/compact"
       - name: Repeat adversarial and concurrency tests
         run: |
           set -euo pipefail
@@ -65,10 +70,10 @@ jobs:
           set -euo pipefail
           tools/test-release-safety.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/release-safety.log"
           tools/grid-lint.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/grid-lint.log"
-      - name: Verify release configuration builds
+      - name: Build and verify the staged app bundle
         run: |
           set -euo pipefail
-          swift build -c release --scratch-path "$RUNNER_TEMP/lindo-release-build" 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/release-build.log"
+          ./build.sh --no-install 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/release-build.log"
       - name: Retain source ZIP and synthetic evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -82,5 +87,7 @@ jobs:
             ${{ runner.temp }}/lindo-evidence/export.json
             ${{ runner.temp }}/lindo-stability/*.json
             ${{ runner.temp }}/lindo-stability/*.log
+            ${{ runner.temp }}/lindo-screens/**/*.png
+            ${{ runner.temp }}/lindo-screens/**/*-layout.json
             /tmp/Lindo-shots/*.png
             /tmp/Lindo-shots/*-layout.json

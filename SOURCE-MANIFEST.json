@@ -1,10 +1,10 @@
 {
   "files": [
     {
-      "bytes": 3391,
+      "bytes": 3889,
       "mode": "0644",
       "path": ".github/workflows/ci.yml",
-      "sha256": "8c04dbd6cc7b955ece085a66cbc64e3cffb394e4df77389d006cf13c36e666a0"
+      "sha256": "d58f41b2f8ad1aa2b11511be831fc6756a7d2326c51706baefd7d0e189f4a8ee"
     },
     {
       "bytes": 45,
@@ -19,10 +19,10 @@
       "sha256": "927483e1d7dd3997952bb347f125472d9bb4c949949694fde1dfcea9e4466de9"
     },
     {
-      "bytes": 1628,
+      "bytes": 2013,
       "mode": "0644",
       "path": "CONTRIBUTING.md",
-      "sha256": "575f448d4d796d5ad3d44c2d24a2b36365cbf6662c86041ad1b71106b3647928"
+      "sha256": "bbd6c5fc0767a61e8f8a78426ecff2d72c5db72bf3f828130f74505a79905915"
     },
     {
       "bytes": 170,
@@ -67,10 +67,10 @@
       "sha256": "2c76f41ee3522cfd2ca9759dbbb0b18bfaae30c007c8fa195aba341f16358032"
     },
     {
-      "bytes": 2755,
+      "bytes": 2998,
       "mode": "0644",
       "path": "README.md",
-      "sha256": "f3208701e62a01eb7e145a59d5fa873154670541ae02192ff8525795cff9e1db"
+      "sha256": "8bae4e6f8598e4859dc513015d7297384959440b4b86568962d7fba6ebf04365"
     },
     {
       "bytes": 2527,
@@ -103,10 +103,10 @@
       "sha256": "f71062772f04d0e139344d5998d838c6d51f92071f43c13f53121c88bb6b9a50"
     },
     {
-      "bytes": 12664,
+      "bytes": 12778,
       "mode": "0644",
       "path": "Sources/Lindo/DuplicateView.swift",
-      "sha256": "a4262f3ab59f039e83c6c5bf822fa15905ffa3a947a78ba9cb02d4ceb5cfb95d"
+      "sha256": "71212c5e0f37be3447a1955abd2bc0b83f08d695a3b24644fcf1e0742816b903"
     },
     {
       "bytes": 9393,
@@ -169,10 +169,10 @@
       "sha256": "4cc02c295e8d94d1ca3dbb7a9aabdad3ad104dc8957c182d64ddb9c06b7fa590"
     },
     {
-      "bytes": 22389,
+      "bytes": 26308,
       "mode": "0644",
       "path": "Sources/Lindo/Snapshot.swift",
-      "sha256": "11cf6791b62f83c83f328d119bf05acc72948c1855c8fcb05d2ab62a233e9a8c"
+      "sha256": "19c37ce23dae6a7311f4fda5796ddceb8e5754bde3979cf9a600694a86425e4e"
     },
     {
       "bytes": 12123,
@@ -379,10 +379,10 @@
       "sha256": "cb999365bfcaeb791d09f169ade8cb6d1418b083a269a84a0591cb223fd0ad17"
     },
     {
-      "bytes": 3391,
+      "bytes": 3889,
       "mode": "0644",
       "path": "tools/ci/public-ci.yml",
-      "sha256": "8c04dbd6cc7b955ece085a66cbc64e3cffb394e4df77389d006cf13c36e666a0"
+      "sha256": "d58f41b2f8ad1aa2b11511be831fc6756a7d2326c51706baefd7d0e189f4a8ee"
     },
     {
       "bytes": 3265,
@@ -445,10 +445,10 @@
       "sha256": "a9315507d9a8073b481e421b0395fb280aabe6dc98619ca97607110df3de90f1"
     },
     {
-      "bytes": 6945,
+      "bytes": 7325,
       "mode": "0644",
       "path": "tools/stability-test.py",
-      "sha256": "0ca2c01dd759afd8ffa65d8487f4d59fd74f9ae1137e82dbe474e55c0fe44e3e"
+      "sha256": "2977828bb0cc642f13f59f07680cc5e76772eb50bbd09de490a676f5607aabc5"
     },
     {
       "bytes": 5615,

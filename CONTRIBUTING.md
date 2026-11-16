@@ -17,4 +17,6 @@ Non includere credenziali, certificati, dati clienti, log personali o cartelle `
 
 La CI ha permessi di sola lettura sul repository ed esegue codice delle pull request senza segreti. Non effettua upload ad Apple, installazioni sul Mac di un utente o pubblicazioni di release.
 
+La sorgente del workflow è `tools/ci/public-ci.yml`; l'export la copia in `.github/workflows/ci.yml`. Mantieni i due file identici quando cambi la CI. `SOURCE-MANIFEST.json` descrive lo snapshot esportato: dopo modifiche ai file, rigenera l'export prima di distribuire un nuovo ZIP o aggiornare il manifest. Il manifest non certifica modifiche successive e non va aggiornato a mano.
+
 I contributi sono distribuiti con la licenza MIT del repository.

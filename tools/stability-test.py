@@ -75,7 +75,13 @@ def main() -> int:
                "--scratch-path", str(scratch), "--filter", args.filter]
     frameworks = Path("/Library/Developer/CommandLineTools/Library/Developer/Frameworks")
     libraries = Path("/Library/Developer/CommandLineTools/Library/Developer/usr/lib")
-    if (frameworks / "Testing.framework").exists():
+    try:
+        developer = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True,
+                                   timeout=20, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        developer = ""
+    # Do not mix a selected Xcode toolchain with the separate CLT frameworks.
+    if developer == "/Library/Developer/CommandLineTools" and (frameworks / "Testing.framework").exists():
         command += ["-Xswiftc", "-F", "-Xswiftc", str(frameworks),
                     "-Xlinker", "-F", "-Xlinker", str(frameworks),
                     "-Xlinker", "-rpath", "-Xlinker", str(frameworks),
