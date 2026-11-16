@@ -8,6 +8,7 @@ import SwiftUI
 @Observable
 final class FolderBrowserModel {
     let initialURL: URL
+    let downloadsURL: URL
     private(set) var currentURL: URL
     var pathText: String {
         didSet { pathRevision &+= 1 }
@@ -22,12 +23,13 @@ final class FolderBrowserModel {
     @ObservationIgnored private var requestID: UUID?
     @ObservationIgnored private var pathRevision: UInt64 = 0
 
-    init(initialURL: URL, loadingTimeout: Duration = .seconds(5),
+    init(initialURL: URL, downloadsURL: URL? = nil, loadingTimeout: Duration = .seconds(5),
          loader: ((URL) async throws -> FolderListing)? = nil) {
         let reader = FolderDirectoryReader()
         self.loader = loader ?? { url in try await reader.list(url) }
         self.loadingTimeout = loadingTimeout
         self.initialURL = initialURL
+        self.downloadsURL = downloadsURL ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "Downloads")
         currentURL = initialURL
         pathText = initialURL.path(percentEncoded: false)
     }
@@ -37,7 +39,7 @@ final class FolderBrowserModel {
         guard expanded.hasPrefix("/") else { return false }
         let enteredURL = URL(fileURLWithPath: expanded, isDirectory: true).standardizedFileURL
         return !loading && error == nil && listing?.canSelect == true
-            && listing?.directory == currentURL && enteredURL == currentURL.standardizedFileURL
+            && listing?.directory == currentURL && enteredURL.path == currentURL.standardizedFileURL.path
     }
 
     /// The returned task completes after the model has consumed or discarded the response.
@@ -63,7 +65,7 @@ final class FolderBrowserModel {
             self.loadTask = nil
             self.timeoutTask = nil
             self.loading = false
-            self.error = "Il caricamento richiede troppo tempo. Potrebbe esserci una richiesta di accesso di macOS o un’attesa del servizio cloud. Controlla gli avvisi, scegli una cartella locale o premi Vai per riprovare."
+            self.error = "Il caricamento richiede troppo tempo. Potrebbe esserci una richiesta di accesso di macOS o un’attesa del servizio cloud. Controlla gli avvisi, premi Riprova oppure apri Download."
         }
         let task = Task {
             do {
@@ -93,15 +95,25 @@ final class FolderBrowserModel {
         return task
     }
 
-    func navigatePath() {
+    @discardableResult
+    func navigatePath() -> Task<Void, Never>? {
         let expanded = (pathText as NSString).expandingTildeInPath
         guard expanded.hasPrefix("/") else {
             stop()
             listing = nil
             error = "Inserisci un percorso completo, per esempio ~/Downloads."
-            return
+            return nil
         }
-        navigate(to: URL(fileURLWithPath: expanded, isDirectory: true))
+        return navigate(to: URL(fileURLWithPath: expanded, isDirectory: true))
+    }
+
+    /// Retry the text currently entered, including edits made while the failed read was pending.
+    @discardableResult
+    func retry() -> Task<Void, Never>? { navigatePath() }
+
+    @discardableResult
+    func openDownloads() -> Task<Void, Never> {
+        navigate(to: downloadsURL)
     }
 
     func stop() {
@@ -119,11 +131,12 @@ struct FolderBrowserView: View {
     @Bindable var model: FolderBrowserModel
     let onCancel: () -> Void
     let onSelect: (URL) -> Void
+    @State private var showErrorDetails = false
 
     private var favorites: [(String, String, URL)] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return [("Inizio", "house", home),
-                ("Download", "arrow.down.circle", home.appending(path: "Downloads")),
+                ("Download", "arrow.down.circle", model.downloadsURL),
                 ("Documenti", "doc", home.appending(path: "Documents")),
                 ("Scrivania", "desktopcomputer", home.appending(path: "Desktop")),
                 ("Cloud", "cloud", home.appending(path: "Library/CloudStorage"))]
@@ -185,7 +198,18 @@ struct FolderBrowserView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             if let error = model.error {
-                Text(error).font(.caption).foregroundStyle(.red).lineLimit(3)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(error).font(.caption).foregroundStyle(.red).lineLimit(3)
+                        .help(error)
+                    HStack(spacing: 12) {
+                        Button("Riprova") { model.retry() }
+                            .accessibilityIdentifier("folder-browser-retry")
+                        Button("Apri Download") { model.openDownloads() }
+                            .accessibilityIdentifier("folder-browser-downloads")
+                        Button("Dettagli…") { showErrorDetails = true }
+                            .accessibilityIdentifier("folder-browser-error-details")
+                    }
+                }
             } else if let warnings = model.listing?.warnings, !warnings.isEmpty {
                 Text(warnings.joined(separator: " ")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -208,5 +232,8 @@ struct FolderBrowserView: View {
         .gridArea("folder-browser", inset: 20)
         .task { model.navigate(to: model.initialURL) }
         .onDisappear { model.stop() }
+        .sheet(isPresented: $showErrorDetails) {
+            DetailsSheet(title: "Impossibile aprire la cartella", lines: [model.error ?? "Nessun errore corrente."])
+        }
     }
 }

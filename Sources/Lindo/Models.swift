@@ -89,7 +89,12 @@ struct DiskSpace {
 @Observable
 final class AppModel {
     var sidebar: SidebarItem = .overview {
-        didSet { if sidebar != oldValue { folderPicker.cancel() } }
+        didSet {
+            if sidebar != oldValue {
+                folderPicker.cancel()
+                pageChanged()
+            }
+        }
     }
     var disk = DiskSpace.current()
     var items: [SidebarItem: [ScanItem]] = [:] {
@@ -97,14 +102,26 @@ final class AppModel {
     }
     var warnings: [SidebarItem: [String]] = [:]
     var scanDates: [SidebarItem: Date] = [:]
+    var scannedScopes: [SidebarItem: String] = [:]
     var scanOutcomes: [SidebarItem: ScanOutcome] = [:]
-    var selected: Set<String> = [] {
-        didSet { selectionRevision += 1 }
+    var coverageByPage: [SidebarItem: ScanCoverage] = [:]
+    private var selectionsByPage: [SidebarItem: Set<String>] = [:]
+    private var queriesByPage: [SidebarItem: String] = [:]
+    var selected: Set<String> {
+        get { selection(for: sidebar) }
+        set { setSelection(newValue, for: sidebar) }
     }
-    var query = ""
+    var query: String {
+        get { queriesByPage[sidebar] ?? "" }
+        set { queriesByPage[sidebar] = newValue }
+    }
+    var largeRoot: URL? {
+        didSet { if largeRoot != oldValue { clearResults(.largeFiles) } }
+    }
+    var duplicateRoot: URL? {
+        didSet { if duplicateRoot != oldValue { clearResults(.duplicates) } }
+    }
     var searchFocusRequest = 0
-    var largeRoot: URL?
-    var duplicateRoot: URL?
     var spaceScope: SpaceScope = .downloads
     var spaceRoot = SpaceScope.downloads.root
     var spaceReport: SpaceReport?
@@ -123,11 +140,15 @@ final class AppModel {
         }
     }
     private(set) var duplicateKeeperIDs: Set<String> = []
-    var duplicateMinimumKB = 0
+    var duplicateMinimumKB = 0 {
+        didSet { if duplicateMinimumKB != oldValue { clearResults(.duplicates) } }
+    }
     var duplicateSortOrder: DuplicateSortOrder = .extraBytes
     var reviewKeepers: [String: String] = [:]
     var progressText = "Analisi in corso…"
-    var minimumMB = 100
+    var minimumMB = 100 {
+        didSet { if minimumMB != oldValue { clearResults(.largeFiles) } }
+    }
     var activePage: SidebarItem?
     var scanning = false
     var scanCancelling = false
@@ -138,6 +159,8 @@ final class AppModel {
     var failuresByPage: [SidebarItem: [String]] = [:]
     var reviewItems: [ScanItem] = []
     var preservedReviewFiles: [ScanItem] = []
+    private(set) var reviewDuplicateGroups: [ReviewDuplicateGroup] = []
+    private(set) var reviewDuplicateRows: [ReviewDuplicateRow] = []
     var reviewPage: SidebarItem = .overview
     let isSample = ProcessInfo.processInfo.environment["APP_SAMPLE"] == "1"
     let scanner = MacScanner()
@@ -149,6 +172,7 @@ final class AppModel {
     @ObservationIgnored var selectionCache: SelectionProjection?
     @ObservationIgnored var projectionBuildCount = 0
     @ObservationIgnored var appearedDuplicateRows: Set<String> = []
+    @ObservationIgnored var appearedReviewRows: Set<String> = []
     private let folderPresenter = InlineFolderPicker()
     @ObservationIgnored private lazy var folderPicker = FolderPickerCoordinator(presenter: folderPresenter)
     var choosingFolder: Bool { folderPicker.choosing }
@@ -185,9 +209,21 @@ final class AppModel {
     var chosenRoot: URL? { sidebar == .duplicates ? duplicateRoot : largeRoot }
 
     func pageChanged() {
-        selected.removeAll()
-        query = ""
         showWarnings = false
+    }
+
+    func selection(for page: SidebarItem) -> Set<String> { selectionsByPage[page] ?? [] }
+    func searchQuery(for page: SidebarItem) -> String { queriesByPage[page] ?? "" }
+
+    func setSelection(_ ids: Set<String>, for page: SidebarItem) {
+        selectionsByPage[page] = ids
+        selectionRevision += 1
+    }
+
+    /// A new scan or a changed scope invalidates only that page's interaction state.
+    func resetInteraction(for page: SidebarItem) {
+        setSelection([], for: page)
+        queriesByPage[page] = nil
     }
 
     func chooseFolder(andScan: Bool = false) {
@@ -200,13 +236,8 @@ final class AppModel {
             return self.sidebar == page && !self.isBusy && !self.isSample && !self.showConfirmation
         }, apply: { [weak self] url, shouldScan in
             guard let self else { return }
-            if page == .duplicates {
-                self.duplicateRoot = url
-                self.duplicateGroups = []
-                self.duplicateKeepers = [:]
-            } else { self.largeRoot = url }
-            self.clearResults(page)
-            self.selected.removeAll()
+            if page == .duplicates { self.duplicateRoot = url }
+            else { self.largeRoot = url }
             if shouldScan { self.startScan() }
         })
     }
@@ -220,7 +251,7 @@ final class AppModel {
             return
         }
         sidebar = page
-        selected.removeAll()
+        resetInteraction(for: page)
         notices[page] = nil
         failuresByPage[page] = nil
         activePage = page
@@ -231,6 +262,7 @@ final class AppModel {
         let root = page == .duplicates ? duplicateRoot : largeRoot
         let threshold = Int64(minimumMB) * 1_000_000
         let duplicateThreshold = max(1, Int64(duplicateMinimumKB) * 1_000)
+        let scannedScope = configuredScopeDescription(for: page)
         scanTask = Task {
             var reports: [ScanReport] = []
             var duplicateReport: DuplicateReport?
@@ -262,15 +294,17 @@ final class AppModel {
             items[page] = (duplicateReport?.groups.flatMap(\.files) ?? reports.flatMap(\.items)).sorted { $0.bytes > $1.bytes }
             var messages = reports.flatMap(\.warnings) + (duplicateReport?.warnings ?? [])
             let cancelled = Task.isCancelled || reports.contains(where: \.cancelled) || duplicateReport?.cancelled == true
-            let partial = reports.contains(where: \.isPartial) || duplicateReport?.isPartial == true || !messages.isEmpty
-            scanOutcomes[page] = ScanOutcome(cancelled: cancelled, partial: partial)
+            let coverage = ScanCoverage.combined(reports.map(\.coverage) + (duplicateReport.map { [$0.coverage] } ?? []))
+            coverageByPage[page] = coverage
+            scanOutcomes[page] = ScanOutcome(cancelled: cancelled, partial: coverage.hasUnplannedOmissions, excludedCount: coverage.excludedCount)
             if cancelled {
                 messages.insert("Scansione interrotta: i risultati sono parziali.", at: 0)
-            } else if reports.contains(where: \.isPartial) || duplicateReport?.isPartial == true {
+            } else if coverage.hasUnplannedOmissions {
                 messages.insert("Scansione parziale: alcuni elementi non sono stati esaminati.", at: 0)
             }
             warnings[page] = Array(NSOrderedSet(array: messages)) as? [String] ?? messages
             scanDates[page] = Date()
+            scannedScopes[page] = scannedScope
             scanning = false
             scanCancelling = false
             activePage = nil
@@ -287,6 +321,9 @@ final class AppModel {
         warnings[.spaceMap] = nil
         scanDates[.spaceMap] = nil
         scanOutcomes[.spaceMap] = nil
+        coverageByPage[.spaceMap] = nil
+        scannedScopes[.spaceMap] = nil
+        resetInteraction(for: .spaceMap)
     }
 
     func startSpaceScan(at directory: URL? = nil) {
@@ -296,7 +333,7 @@ final class AppModel {
         guard root.path == boundary || root.path.hasPrefix(boundary + "/") else { return }
         spaceRoot = root
         spaceReport = nil
-        selected.removeAll()
+        resetInteraction(for: .spaceMap)
         activePage = .spaceMap
         scanning = true
         scanCancelling = false
@@ -306,7 +343,9 @@ final class AppModel {
             spaceReport = report
             warnings[.spaceMap] = report.warnings
             scanDates[.spaceMap] = Date()
-            scanOutcomes[.spaceMap] = ScanOutcome(cancelled: report.cancelled, partial: report.isPartial)
+            scannedScopes[.spaceMap] = report.root.path
+            coverageByPage[.spaceMap] = report.coverage
+            scanOutcomes[.spaceMap] = ScanOutcome(cancelled: report.cancelled, partial: report.coverage.hasUnplannedOmissions, excludedCount: report.coverage.excludedCount)
             scanning = false
             scanCancelling = false
             activePage = nil
@@ -341,16 +380,17 @@ final class AppModel {
     }
 
     func reviewSelection() {
-        guard sidebar != .spaceMap && !isBusy && !selectedItems.isEmpty else { return }
+        guard sidebar != .spaceMap && !isBusy && !showConfirmation && !selectedItems.isEmpty else { return }
         reviewItems = selectedItems
         reviewSyncStatus = FileSyncStatus.combined(reviewItems.lazy.map(\.syncStatus))
         reviewPage = sidebar
         reviewKeepers = sidebar == .duplicates ? duplicateKeepers : [:]
         let selectedIDs = Set(reviewItems.map(\.id))
-        preservedReviewFiles = sidebar == .duplicates ? duplicateGroups.flatMap { group in
-            group.files.contains(where: { selectedIDs.contains($0.id) })
-                ? group.files.filter { !selectedIDs.contains($0.id) } : []
-        } : []
+        reviewDuplicateGroups = sidebar == .duplicates
+            ? freezeDuplicateReview(groups: duplicateGroups, selectedIDs: selectedIDs,
+                                    keepers: reviewKeepers, order: duplicateSortOrder) : []
+        preservedReviewFiles = reviewDuplicateGroups.flatMap(\.preserved)
+        reviewDuplicateRows = duplicateReviewRows(reviewDuplicateGroups)
         showConfirmation = true
     }
 
@@ -370,7 +410,7 @@ final class AppModel {
             }
             let moved = Set(report.trashedIDs)
             items[page]?.removeAll { moved.contains($0.id) }
-            selected.subtract(moved)
+            setSelection(selection(for: page).subtracting(moved), for: page)
             if page == .duplicates { removeTrashedDuplicates(moved) }
             failuresByPage[page] = report.failures
             let requested = Set(ids).count
@@ -379,6 +419,8 @@ final class AppModel {
                 : "\(elementCount(moved.count)) \(moved.count == 1 ? "spostato" : "spostati") nel Cestino. Lo spazio si libera quando lo svuoti dal Finder."
             reviewItems = []
             preservedReviewFiles = []
+            reviewDuplicateGroups = []
+            reviewDuplicateRows = []
             cleaning = false
             disk = .current()
             if terminateAfterCleaning {

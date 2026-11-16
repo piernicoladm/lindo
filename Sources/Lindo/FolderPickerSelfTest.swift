@@ -74,8 +74,10 @@ extension FolderPickerSelfTest {
     @MainActor
     private final class LoadingHarness {
         var pending: [CheckedContinuation<FolderListing, Error>] = []
+        var requestedURLs: [URL] = []
         func load(_ url: URL) async throws -> FolderListing {
-            try await withCheckedThrowingContinuation { pending.append($0) }
+            requestedURLs.append(url)
+            return try await withCheckedThrowingContinuation { pending.append($0) }
         }
         func succeed(_ index: Int, directory: URL) {
             guard pending.indices.contains(index) else { return }
@@ -100,14 +102,16 @@ extension FolderPickerSelfTest {
         let timedOutLoad = model.navigate(to: first)
         await waitUntil { !model.loading }
         results.append(("picker-stalled-load-times-out-visibly", !model.loading && model.error?.contains("troppo tempo") == true && !model.canSelect))
-        let retryLoad = model.navigate(to: second)
+        model.pathText = second.path
+        guard let retryLoad = model.retry() else { return results + [("picker-explicit-retry-starts-request", false)] }
         await waitUntil { harness.pending.count >= 2 }
         harness.fail(0, message: "stale response")
         await timedOutLoad.value
-        results.append(("picker-late-load-cannot-overwrite-new-navigation", model.loading && model.error == nil && model.currentURL == second))
+        results.append(("picker-late-load-cannot-overwrite-new-navigation", model.loading && model.error == nil && model.currentURL.path == second.path))
         harness.fail(1, message: "controlled retry completed")
         await retryLoad.value
-        results.append(("picker-can-retry-after-load-timeout", !model.loading && model.currentURL == second && model.error?.contains("controlled retry completed") == true))
+        results.append(("picker-can-retry-after-load-timeout", !model.loading && model.currentURL.path == second.path && model.error?.contains("controlled retry completed") == true))
+        results.append(("picker-explicit-retry-uses-edited-path", harness.requestedURLs.map(\.path) == [first.path, second.path]))
         let cancelledLoad = model.navigate(to: first)
         await waitUntil { harness.pending.count >= 3 }
         let started = ProcessInfo.processInfo.systemUptime
@@ -141,6 +145,23 @@ extension FolderPickerSelfTest {
                         invalidState && editingModel.pathText == "relative/path"
                         && editingModel.error == invalidError && editingModel.listing == nil
                         && !editingModel.loading && !editingModel.canSelect))
+
+        let recoveryHarness = LoadingHarness()
+        let downloads = URL(fileURLWithPath: "/fixture/Downloads")
+        let recoveryModel = FolderBrowserModel(initialURL: first, downloadsURL: downloads,
+                                               loadingTimeout: .milliseconds(50), loader: recoveryHarness.load)
+        let blockedLoad = recoveryModel.navigate(to: first)
+        await waitUntil { !recoveryModel.loading }
+        let recoveryLoad = recoveryModel.openDownloads()
+        await waitUntil { recoveryHarness.pending.count == 2 }
+        recoveryHarness.succeed(1, directory: downloads)
+        await recoveryLoad.value
+        recoveryHarness.fail(0, message: "late cloud error")
+        await blockedLoad.value
+        results.append(("picker-downloads-recovery-selects-new-scope-and-discards-late-error",
+            recoveryHarness.requestedURLs == [first, downloads] && recoveryModel.currentURL == downloads
+            && recoveryModel.pathText == downloads.path && recoveryModel.error == nil
+            && recoveryModel.canSelect && !recoveryModel.loading))
         return results
     }
 

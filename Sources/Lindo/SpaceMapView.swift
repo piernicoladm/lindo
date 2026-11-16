@@ -105,7 +105,9 @@ struct SpaceMapView: View {
     private func partialNotice(_ report: SpaceReport) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.circle").foregroundStyle(.secondary)
-            Text("\(report.cancelled ? "Analisi interrotta." : "Analisi parziale.") Le dimensioni possono essere incomplete. Alcuni percorsi sono esclusi o non accessibili.")
+            Text(report.cancelled ? "Analisi interrotta. Le dimensioni possono essere incomplete."
+                 : report.coverage.hasUnplannedOmissions ? "Analisi parziale. Alcuni percorsi non sono verificabili; le dimensioni possono essere incomplete."
+                 : "Analisi completata con esclusioni previste (\(report.coverage.excludedCount)). Le dimensioni riguardano gli elementi esaminati; i percorsi esclusi restano nei dettagli.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -170,7 +172,8 @@ struct SpaceMapView: View {
                     } else {
                         Text(entry.url.lastPathComponent).lineLimit(1).help(entry.url.path)
                     }
-                    if entry.isPartial { Text("Parziale").font(.caption2).foregroundStyle(.secondary) }
+                    if entry.coverage.hasUnplannedOmissions { Text("Parziale").font(.caption2).foregroundStyle(.secondary) }
+                    else if entry.coverage.excludedCount > 0 { Text("Esclusioni").font(.caption2).foregroundStyle(.secondary) }
                     Spacer(minLength: 8)
                     Text(!entry.isDirectory && entry.alreadyCountedLinks > 0 ? "Già conteggiato" : bytes(entry.allocatedBytes)).monospacedDigit()
                         .accessibilityLabel(!entry.isDirectory && entry.alreadyCountedLinks > 0 ? "File già conteggiato in un’altra voce" : "Spazio allocato: \(bytes(entry.allocatedBytes))")

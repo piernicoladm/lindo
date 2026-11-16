@@ -36,12 +36,15 @@ enum Snapshot {
             try? await Task.sleep(for: .seconds(1))
             for mode in ["light", "dark"] {
                 NSApp.appearance = NSAppearance(named: mode == "light" ? .aqua : .darkAqua)
+                for page in SidebarItem.allCases { model.resetInteraction(for: page) }
                 for page in SidebarItem.allCases {
                     model.sidebar = page
                     try? await Task.sleep(for: .milliseconds(600))
                     await capture("\(directory)/\(page.rawValue)-\(mode).png")
                 }
                 await captureUXStates(model: model, directory: directory, mode: mode)
+                await captureProductStates(model: model, directory: directory, mode: mode)
+                await captureCoverageStates(model: model, directory: directory, mode: mode)
                 await captureReviewStates(model: model, directory: directory, mode: mode)
                 model.sidebar = .duplicates
                 try? await Task.sleep(for: .milliseconds(300))
@@ -115,7 +118,11 @@ enum Snapshot {
                 await capture("\(directory)/settings-\(mode).png", window: settings, probeAreas: ["settings"])
                 settings.orderOut(nil)
 
-                let browser = FolderBrowserModel(initialURL: URL(fileURLWithPath: "/Cartella di esempio"), loader: { _ in
+                let sampleDownloads = URL(fileURLWithPath: "/Users/demo/Downloads")
+                let browser = FolderBrowserModel(initialURL: URL(fileURLWithPath: "/Cartella di esempio"), downloadsURL: sampleDownloads, loader: { url in
+                    if url == sampleDownloads {
+                        return FolderListing(directory: url, children: [], warnings: [], canSelect: true, parent: nil)
+                    }
                     throw NSError(domain: "LindoPreview", code: 1, userInfo: [NSLocalizedDescriptionKey: "Controlla il consenso di macOS oppure scegli una cartella locale."])
                 })
                 let chooser = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 500), styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -126,6 +133,13 @@ enum Snapshot {
                 chooser.makeKeyAndOrderFront(nil)
                 try? await Task.sleep(for: .milliseconds(400))
                 await capture("\(directory)/folder-chooser-\(mode).png", window: chooser, probeAreas: ["folder-browser"])
+                await browser.openDownloads().value
+                try? await Task.sleep(for: .milliseconds(300))
+                await capture("\(directory)/folder-chooser-recovered-\(mode).png", window: chooser, probeAreas: ["folder-browser"])
+                if !browser.canSelect || browser.currentURL != sampleDownloads {
+                    captureFailures += 1
+                    log("SNAPSHOT folder recovery did not reach the synthetic Downloads listing")
+                }
                 browser.stop()
                 chooser.orderOut(nil)
             }
@@ -239,6 +253,19 @@ enum Snapshot {
         let count = model.appearedDuplicateRows.count
         log("LAZY_ROWS \(mode): \(count) appeared of 10000; capture elapsed \(ProcessInfo.processInfo.systemUptime - started)s")
         if count == 0 || count >= 200 { captureFailures += 1; log("LAZY_ROWS failed viewport bound") }
+        model.selectDuplicateCopies()
+        model.appearedReviewRows = []
+        model.reviewSelection()
+        try? await Task.sleep(for: .milliseconds(500))
+        await captureConfirmationSheet("\(directory)/ten-thousand-review-\(mode)-sheet.png")
+        let reviewCount = model.appearedReviewRows.count
+        log("LAZY_REVIEW_ROWS \(mode): \(reviewCount) appeared of \(model.reviewDuplicateRows.count)")
+        if reviewCount == 0 || reviewCount >= 200 {
+            captureFailures += 1
+            log("LAZY_REVIEW_ROWS failed viewport bound")
+        }
+        model.showConfirmation = false
+        try? await Task.sleep(for: .milliseconds(300))
         model.items = savedItems
         model.scanDates = savedDates
         model.warnings = savedWarnings
@@ -246,7 +273,147 @@ enum Snapshot {
         model.duplicateGroups = savedGroups
         model.duplicateKeepers = savedKeepers
         model.spaceReport = savedMap
-        model.pageChanged()
+        model.resetInteraction(for: .duplicates)
+    }
+
+    /// Fixture-driven screens exercise model transitions without filesystem access or fake clicks.
+    private static func captureProductStates(model: AppModel, directory: String, mode: String) async {
+        let savedPage = model.sidebar
+        let savedItems = model.items, savedDates = model.scanDates, savedScopes = model.scannedScopes
+        let savedWarnings = model.warnings, savedOutcomes = model.scanOutcomes
+        let savedNotices = model.notices, savedFailures = model.failuresByPage
+        let savedKeepers = model.duplicateKeepers, savedMinimum = model.minimumMB
+        let savedMap = model.spaceReport, savedMapRoot = model.spaceRoot
+        let interactions = SidebarItem.allCases.map { ($0, model.selection(for: $0), model.searchQuery(for: $0)) }
+
+        model.sidebar = .duplicates
+        model.selected = Set(model.duplicateGroups.first?.files.dropFirst().prefix(1).map(\.id) ?? [])
+        let duplicateSelection = model.selected
+        model.query = "Foto_evento"
+        model.sidebar = .largeFiles
+        model.selected = Set(model.currentItems.prefix(1).map(\.id))
+        let largeSelection = model.selected
+        model.query = "Workshop"
+        model.sidebar = .overview
+        model.sidebar = .duplicates
+        try? await Task.sleep(for: .milliseconds(300))
+        await capture("\(directory)/selection-restored-duplicates-\(mode).png")
+        if model.selected != duplicateSelection || model.query != "Foto_evento" {
+            captureFailures += 1; log("SNAPSHOT duplicate navigation did not preserve interaction")
+        }
+        model.sidebar = .largeFiles
+        try? await Task.sleep(for: .milliseconds(300))
+        await capture("\(directory)/selection-restored-largeFiles-\(mode).png")
+        if model.selected != largeSelection || model.query != "Workshop" {
+            captureFailures += 1; log("SNAPSHOT large-file navigation did not preserve interaction")
+        }
+
+        model.minimumMB = 500
+        model.items[.largeFiles] = savedItems[.largeFiles]?.filter { $0.bytes >= 500_000_000 }
+        model.scanDates[.largeFiles] = savedDates[.largeFiles]
+        model.scannedScopes[.largeFiles] = model.configuredScopeDescription(for: .largeFiles)
+        try? await Task.sleep(for: .milliseconds(300))
+        await capture("\(directory)/largeFiles-500mb-\(mode).png")
+
+        model.sidebar = .duplicates
+        model.query = ""
+        model.selected = []
+        if let group = model.duplicateGroups.first, let copy = group.files.last {
+            model.keep(copy, in: group)
+            model.selectDuplicateCopies()
+            try? await Task.sleep(for: .milliseconds(300))
+            await capture("\(directory)/duplicate-keeper-changed-\(mode).png")
+            model.reviewSelection()
+            try? await Task.sleep(for: .milliseconds(500))
+            await captureConfirmationSheet("\(directory)/duplicate-keeper-review-\(mode)-sheet.png")
+            if model.reviewKeepers[group.id] != copy.id || model.reviewItems.contains(where: { $0.id == copy.id }) {
+                captureFailures += 1; log("SNAPSHOT changed protected copy entered removal review")
+            }
+            model.showConfirmation = false
+            try? await Task.sleep(for: .milliseconds(300))
+        } else {
+            captureFailures += 1; log("SNAPSHOT missing synthetic group for protected-copy change")
+        }
+
+        model.sidebar = .spaceMap
+        let nested = savedMapRoot.appending(path: "Video")
+        model.spaceRoot = nested
+        model.spaceReport = SpaceReport(root: nested, entries: [
+            SpaceEntry(url: nested.appending(path: "Montaggio finale.mov"), allocatedBytes: 12_000_000_000,
+                       logicalBytes: 11_998_000_000, fileCount: 1, isDirectory: false, isPartial: false),
+            SpaceEntry(url: nested.appending(path: "Riprese"), allocatedBytes: 6_600_000_000,
+                       logicalBytes: 6_594_000_000, fileCount: 23, isDirectory: true, isPartial: false)
+        ], allocatedBytes: 18_600_000_000, logicalBytes: 18_592_000_000, fileCount: 24,
+           inspectedCount: 25, warnings: [], isPartial: false, cancelled: false, duration: 0.1)
+        model.warnings[.spaceMap] = []
+        model.scanOutcomes[.spaceMap] = .complete
+        try? await Task.sleep(for: .milliseconds(300))
+        await capture("\(directory)/spaceMap-nested-\(mode).png")
+
+        model.minimumMB = savedMinimum
+        model.items = savedItems
+        model.scanDates = savedDates
+        model.scannedScopes = savedScopes
+        model.warnings = savedWarnings
+        model.scanOutcomes = savedOutcomes
+        model.notices = savedNotices
+        model.failuresByPage = savedFailures
+        model.duplicateKeepers = savedKeepers
+        model.spaceRoot = savedMapRoot
+        model.spaceReport = savedMap
+        for (page, selected, query) in interactions {
+            model.sidebar = page
+            model.selected = selected
+            model.query = query
+        }
+        model.sidebar = savedPage
+    }
+
+    private static func captureCoverageStates(model: AppModel, directory: String, mode: String) async {
+        let page = model.sidebar, warnings = model.warnings, outcomes = model.scanOutcomes
+        let coverage = model.coverageByPage, map = model.spaceReport
+        model.sidebar = .duplicates
+        model.coverageByPage[.duplicates] = ScanCoverage(excludedCount: 3)
+        model.scanOutcomes[.duplicates] = .excluded
+        model.warnings[.duplicates] = ["Elementi nascosti esclusi: 2.", "Pacchetti esclusi: 1."]
+        try? await Task.sleep(for: .milliseconds(300))
+        await capture("\(directory)/coverage-exclusions-duplicates-\(mode).png")
+        model.coverageByPage[.duplicates] = ScanCoverage(excludedCount: 3, hasUnplannedOmissions: true)
+        model.scanOutcomes[.duplicates] = .partial
+        model.warnings[.duplicates]?.append("Cartella non accessibile: /Users/demo/Documents/Limitata")
+        try? await Task.sleep(for: .milliseconds(300))
+        await capture("\(directory)/coverage-mixed-duplicates-\(mode).png")
+        if let map {
+            let entries = map.entries.map { entry in
+                SpaceEntry(id: entry.id, url: entry.url, allocatedBytes: entry.allocatedBytes,
+                           logicalBytes: entry.logicalBytes, fileCount: entry.fileCount,
+                           isDirectory: entry.isDirectory, isPartial: entry.isPartial,
+                           alreadyCountedLinks: entry.alreadyCountedLinks,
+                           coverage: ScanCoverage(excludedCount: entry.isPartial ? 1 : 0))
+            }
+            let excluded = entries.reduce(0) { $0 + $1.coverage.excludedCount }
+            let mapCoverage = ScanCoverage(excludedCount: excluded)
+            let mapWarnings = ["Percorsi privati esclusi dalle regole: \(excluded)."]
+            model.spaceReport = SpaceReport(root: map.root, entries: entries, allocatedBytes: map.allocatedBytes,
+                logicalBytes: map.logicalBytes, fileCount: map.fileCount, inspectedCount: map.inspectedCount,
+                warnings: mapWarnings, isPartial: true, cancelled: false, duration: map.duration, coverage: mapCoverage)
+            model.coverageByPage[.spaceMap] = mapCoverage
+            model.scanOutcomes[.spaceMap] = .excluded
+            model.warnings[.spaceMap] = mapWarnings
+            model.sidebar = .spaceMap
+            try? await Task.sleep(for: .milliseconds(300))
+            await capture("\(directory)/coverage-exclusions-map-\(mode).png")
+        } else {
+            captureFailures += 1; log("SNAPSHOT coverage requires the synthetic space map")
+        }
+        model.sidebar = .overview
+        try? await Task.sleep(for: .milliseconds(300))
+        await capture("\(directory)/coverage-overview-\(mode).png")
+        model.warnings = warnings
+        model.scanOutcomes = outcomes
+        model.coverageByPage = coverage
+        model.spaceReport = map
+        model.sidebar = page
     }
 
     private static func captureSyncReviewStates(model: AppModel, directory: String, mode: String) async {
@@ -409,10 +576,13 @@ enum Snapshot {
         }
         model.query = "Workshop"
         check(model.visibleItems.count == 1, "Search results")
-        model.pageChanged()
-        check(model.selected.isEmpty && model.query.isEmpty, "Page change clears selection")
+        let savedSelection = model.selected
+        model.sidebar = .applications
+        check(model.selected.isEmpty && model.query.isEmpty, "Unvisited page starts without a selection or query")
+        model.sidebar = .largeFiles
+        check(model.selected == savedSelection && model.query == "Workshop", "Navigation restores page selection and query")
         if let item = model.currentItems.first {
-            model.toggle(item)
+            model.selected = [item.id]
             model.reviewSelection()
             let reviewedIDs = model.reviewItems.map(\.id)
             model.sidebar = .applications

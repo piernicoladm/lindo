@@ -25,34 +25,34 @@
       "sha256": "bbd6c5fc0767a61e8f8a78426ecff2d72c5db72bf3f828130f74505a79905915"
     },
     {
-      "bytes": 170,
+      "bytes": 304,
       "mode": "0644",
       "path": "Icon/AppIcon.icon/Assets/back.svg",
-      "sha256": "df6b3fa8854664b21f078a8ad83d137849ba0b2afa9634832c786d4e4efbddab"
+      "sha256": "69f995aba5b2e4be4299c7387cf13554b1d65bfcb2af00809a195d2ddb7039a7"
     },
     {
-      "bytes": 346,
+      "bytes": 304,
       "mode": "0644",
       "path": "Icon/AppIcon.icon/Assets/front.svg",
-      "sha256": "2db9dbe7bcca41c86ad086c851cb3ad1f4badac9597e948a397833f72fcd18cc"
+      "sha256": "3df8b8cf79c372ccbb3dcc5d0df4ad23fa3013b2249b94d76805539909bb85a6"
     },
     {
-      "bytes": 431,
+      "bytes": 585,
       "mode": "0644",
       "path": "Icon/AppIcon.icon/icon.json",
-      "sha256": "1539f2fdfda93e69f83dd70e1e1ae349d107a5e2f80f6e091dfc3904234b2ec1"
+      "sha256": "02556b18f503f4b4ddfd622146ca9a51e01cd9ead079bfd590e9d1d0ece7ce25"
     },
     {
-      "bytes": 418,
+      "bytes": 510,
       "mode": "0644",
       "path": "Icon/Mark.svg",
-      "sha256": "23c61f7a07a6bbcde6b02be016b7c39d85546d2fe618cbfa85a1b93f7ccfbddf"
+      "sha256": "b43a21bfc95ca8fc9bd319c97d1be224b2b9b5e04161920dfe9f1d9ad520f27e"
     },
     {
       "bytes": 2145,
       "mode": "0644",
       "path": "Info.plist.in",
-      "sha256": "3b1986ad3d8f1061d7dee68a8d4b6cf3226a17d88a3b47221c3e4027f9b4e429"
+      "sha256": "07709e763ffaa1d21b544075706950ef42cd3c706a0e5b8931d8bd49e3766dbe"
     },
     {
       "bytes": 1076,
@@ -70,7 +70,7 @@
       "bytes": 2998,
       "mode": "0644",
       "path": "README.md",
-      "sha256": "8bae4e6f8598e4859dc513015d7297384959440b4b86568962d7fba6ebf04365"
+      "sha256": "137bc2bcce4249194c8ccf6650d2f6e91cc05bbdb9107b3a0bbd5d3e10a09131"
     },
     {
       "bytes": 2527,
@@ -91,28 +91,34 @@
       "sha256": "aaba47260af80143883e014c6b9f985e8fb7dbfcdae48ddbce2fca09343a4cc7"
     },
     {
-      "bytes": 9735,
+      "bytes": 9545,
       "mode": "0644",
       "path": "Sources/Lindo/ContentView.swift",
-      "sha256": "e7c588ab59855fc9495f61aee43db41bf7ceb1496a8b25adc46580ae61d14258"
+      "sha256": "6ef35322890dfc25f706f2585ca47406ce43aff4e327bebb65171b8b9fcd3a15"
     },
     {
-      "bytes": 1879,
+      "bytes": 1664,
+      "mode": "0644",
+      "path": "Sources/Lindo/CoverageSelfTest.swift",
+      "sha256": "e287d977676765324a90f94e13836aa0113ce2bb5e1ab613052ef45604ddf098"
+    },
+    {
+      "bytes": 2002,
       "mode": "0644",
       "path": "Sources/Lindo/DuplicateSupport.swift",
-      "sha256": "f71062772f04d0e139344d5998d838c6d51f92071f43c13f53121c88bb6b9a50"
+      "sha256": "e1f34721f79a9add2b1858639ad52b0412fbcf54a0ad74a7bebb1d8cbb66fe5f"
     },
     {
-      "bytes": 12778,
+      "bytes": 12833,
       "mode": "0644",
       "path": "Sources/Lindo/DuplicateView.swift",
-      "sha256": "71212c5e0f37be3447a1955abd2bc0b83f08d695a3b24644fcf1e0742816b903"
+      "sha256": "db727bbe2e0133532ba99f5686570f6d391fb34e7ea94287ad0f4c406894bfa0"
     },
     {
-      "bytes": 9393,
+      "bytes": 10748,
       "mode": "0644",
       "path": "Sources/Lindo/FolderBrowser.swift",
-      "sha256": "4b398278020e6f476b5f90f0242cff3a0e7372105672a824df6e6fcddde77040"
+      "sha256": "a8c8d79d89fb4213a310b3f12890e45fa32e7e7a6d2155adf6f5351d8cba04be"
     },
     {
       "bytes": 4232,
@@ -121,16 +127,16 @@
       "sha256": "adb947f63e5c1ed47345bb5af25fa6b021949a7e796569749823dcd10ae37ba6"
     },
     {
-      "bytes": 7937,
+      "bytes": 9362,
       "mode": "0644",
       "path": "Sources/Lindo/FolderPickerSelfTest.swift",
-      "sha256": "e64dd88269a62f163e21976d424469e82ddbaeb9e2a0225d9d73f5ef7093bf76"
+      "sha256": "0486e653b27e675711a2fb9a5cd134ec9dba686f18ca263b4406f83b2e2828f5"
     },
     {
-      "bytes": 22643,
+      "bytes": 24717,
       "mode": "0644",
       "path": "Sources/Lindo/Models.swift",
-      "sha256": "d577144babab62f00c004d86ea2d3835f48b2e3b14604965c972673cb2ab29ad"
+      "sha256": "5b033c822695a37b5639adc0d2216c2d5ccce1d6eb68deeb7b6a76271fc986eb"
     },
     {
       "bytes": 4827,
@@ -139,16 +145,28 @@
       "sha256": "e8d4e4834fdc7eec4e0908dee16729cd6b49cc747df8bc2dd9be0cf39e6ed232"
     },
     {
+      "bytes": 8309,
+      "mode": "0644",
+      "path": "Sources/Lindo/ProductSelfTest.swift",
+      "sha256": "29cdbb0904913d5d4f93a463c9f213ce0960947be0fddff4246edd83844c2ced"
+    },
+    {
       "bytes": 3918,
       "mode": "0644",
       "path": "Sources/Lindo/ResultsProjection.swift",
       "sha256": "acfd70a3faeeb541775ade4960942a0838e7f5909d5c99cf745f0b832ed26ca0"
     },
     {
-      "bytes": 11338,
+      "bytes": 11381,
       "mode": "0644",
       "path": "Sources/Lindo/ResultsView.swift",
-      "sha256": "b5125c1fa266840bd2e9a07f35a1152bce03be7bff75409a1739079063fe0dd0"
+      "sha256": "432fc1da20b30b1f99c9b20d974bc48efada7b643ebcf248d646ed18a5debc4a"
+    },
+    {
+      "bytes": 2159,
+      "mode": "0644",
+      "path": "Sources/Lindo/ReviewPresentation.swift",
+      "sha256": "b2bcc0c56a9748d9a801fa5741704627eb6d9db44ac3a8fdb650c79c5f028fd1"
     },
     {
       "bytes": 11792,
@@ -157,34 +175,40 @@
       "sha256": "5425d713e72fe93ce6416e4838cfde905e53ba10927ab160f15230e86d4515c8"
     },
     {
-      "bytes": 8017,
+      "bytes": 9155,
       "mode": "0644",
       "path": "Sources/Lindo/ReviewView.swift",
-      "sha256": "95d8bf1607dc8d4e99162cef1015e6ae723537eb8fdf6081b784750a0956b1b5"
+      "sha256": "dcef1ca59ea7acd5309d39901e1b14fedd05bb587a605bc1fe88bd630fe07c31"
     },
     {
-      "bytes": 2082,
+      "bytes": 2710,
       "mode": "0644",
       "path": "Sources/Lindo/ScanPresentation.swift",
-      "sha256": "4cc02c295e8d94d1ca3dbb7a9aabdad3ad104dc8957c182d64ddb9c06b7fa590"
+      "sha256": "4fcf3324b32135db6846c52588c8ed4e068557aec4c9257514c0db960dd7628e"
     },
     {
-      "bytes": 26308,
+      "bytes": 1235,
+      "mode": "0644",
+      "path": "Sources/Lindo/ScopePresentation.swift",
+      "sha256": "1654f9879721b5e2994f9066e8f2d3ca06d57d0b04279dd60ed7ba139fc14905"
+    },
+    {
+      "bytes": 36275,
       "mode": "0644",
       "path": "Sources/Lindo/Snapshot.swift",
-      "sha256": "19c37ce23dae6a7311f4fda5796ddceb8e5754bde3979cf9a600694a86425e4e"
+      "sha256": "b21103f9a68fe2250d0454ad137bedab5a424542e32ca71adade56dc7e4bf42a"
     },
     {
-      "bytes": 12123,
+      "bytes": 12546,
       "mode": "0644",
       "path": "Sources/Lindo/SpaceMapView.swift",
-      "sha256": "eaab437b171af2e85f04165b584d18e560dfa968a7ddabe130d3d43115859260"
+      "sha256": "720d8725a304f4807f9c9b56ebb5a27630322d28755b185d121f3f073c2012ad"
     },
     {
-      "bytes": 2895,
+      "bytes": 3286,
       "mode": "0644",
       "path": "Sources/Lindo/UI/Brand.swift",
-      "sha256": "900881d8c280d6660f4c3cc9abe0bc993b3a552f4ee44528d3a337a4d3946a5e"
+      "sha256": "651281b13ba7a213e29e928a3e4fdf5ba5a979511e03489d5e4fbef4a8a541e2"
     },
     {
       "bytes": 5931,
@@ -211,10 +235,10 @@
       "sha256": "2269241a898600c2e476cc85da5914475ab804491c5811bfa40ec51abfa741bf"
     },
     {
-      "bytes": 2785,
+      "bytes": 2866,
       "mode": "0644",
       "path": "Sources/Lindo/UXSelfTest.swift",
-      "sha256": "d61c7df2dc20bda6768ea8cb9fd813ea2125c6f339850a427b6fd0faa53d3ad1"
+      "sha256": "6eff6ff597a0c96531915dda292d1822e68878d30c175acc54c2a0a5ccb11392"
     },
     {
       "bytes": 5060,
@@ -223,10 +247,10 @@
       "sha256": "aa6e75d438be178d15bd6cc9867db437c7af6ea413e32a6ad3087ffc27127935"
     },
     {
-      "bytes": 17585,
+      "bytes": 18232,
       "mode": "0644",
       "path": "Sources/LindoKit/DuplicateScanner.swift",
-      "sha256": "3a54917a7c661f477fa20fb086e994920a5a60871138d27343ea96d9de7f8fba"
+      "sha256": "ac34366769a620cefa7829e0fa96361e13d128b11f06a385bd8f31db51bcf8af"
     },
     {
       "bytes": 1981,
@@ -241,16 +265,22 @@
       "sha256": "6f70121a50736b6f033b72dd1e2e38e4ae597fe668552687f2b4744de1633812"
     },
     {
-      "bytes": 35524,
+      "bytes": 37024,
       "mode": "0644",
       "path": "Sources/LindoKit/MacScanner.swift",
-      "sha256": "cb6bd53eb1fe890d2f502053d9c085a370fe16b3692a619b1cf5239f4a3ff66b"
+      "sha256": "3bb4e839233836657548aa56db3c5890f5296c0f77917636467cae91d39c588c"
     },
     {
       "bytes": 4520,
       "mode": "0644",
       "path": "Sources/LindoKit/ProcessInventory.swift",
       "sha256": "fde6cac900fd6f48a5869f87de6150eaacd12d5a1c6978cfa3fb6d41a2526437"
+    },
+    {
+      "bytes": 1087,
+      "mode": "0644",
+      "path": "Sources/LindoKit/ScanCoverage.swift",
+      "sha256": "a5528105849503f510cb4507b992deb048f74fba5b27ebf37d621f7695b7d5f6"
     },
     {
       "bytes": 2461,
@@ -265,10 +295,10 @@
       "sha256": "1d6adca8acde310e903822d2d1abb468cb5309efd2da441e86e9853f3cfde488"
     },
     {
-      "bytes": 12964,
+      "bytes": 13775,
       "mode": "0644",
       "path": "Sources/LindoKit/SpaceScanner.swift",
-      "sha256": "be820e31d3b9991bbea7180e07b99cf5694e74259229e0a2ca297e1e60260a5b"
+      "sha256": "be158b1d4678cd6b094178937ec900280a546e86b8766c93aede4806fdd6f5eb"
     },
     {
       "bytes": 15137,
@@ -355,6 +385,12 @@
       "sha256": "3ce3d0e2bbc693550a9597a2e2b9f31a92f54335b26ddd9bb45186c67c839f1d"
     },
     {
+      "bytes": 5595,
+      "mode": "0644",
+      "path": "Tests/LindoKitTests/ScanCoverageTests.swift",
+      "sha256": "fc7047ea2dc7357d0059d1d41c3c414a70c08d4e4d52b014d4a7d44da7db3e79"
+    },
+    {
       "bytes": 15618,
       "mode": "0644",
       "path": "Tests/LindoKitTests/ScannerTests.swift",
@@ -385,16 +421,22 @@
       "sha256": "d58f41b2f8ad1aa2b11511be831fc6756a7d2326c51706baefd7d0e189f4a8ee"
     },
     {
-      "bytes": 3265,
+      "bytes": 3732,
       "mode": "0644",
       "path": "tools/draw-icon.swift",
-      "sha256": "451d1d240cd75a91c087b4a4fb61fb400b84bd1b21100eab4c738f1f9c1116a6"
+      "sha256": "57e067e04e7802278177648ddbcaac89f5e17abd7eb193431051c3129672ed68"
     },
     {
-      "bytes": 6969,
+      "bytes": 6990,
       "mode": "0755",
       "path": "tools/export-source.py",
-      "sha256": "6a8f2fdf7451c14b9058f859495341334d22bc60c87a466c3951afd813b13518"
+      "sha256": "8e56808f56c4e2e05b47f0f49ac1b14638b8a7211fd6def0e245f84b5a3a9fed"
+    },
+    {
+      "bytes": 7412,
+      "mode": "0644",
+      "path": "tools/generate-brand.py",
+      "sha256": "3cc87f8dd6a8ba2d619cd16197995b3344fa08c10fe1761f559ba91338ff1366"
     },
     {
       "bytes": 1233,

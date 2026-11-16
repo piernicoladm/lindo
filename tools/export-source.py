@@ -16,7 +16,7 @@ import zipfile
 ROOT_FILES = ('.gitignore', 'Package.swift', 'Info.plist.in', 'build.sh', 'LICENSE')
 TOOLS = ('selftest.sh', 'test-release-safety.sh', 'grid-lint.sh', 'snap.sh',
          'check-layout.swift', 'make_icon.sh', 'draw-icon.swift', 'icon_review.sh',
-         'icon_sheet.swift', 'install-notarized.sh', 'notarize.sh',
+         'icon_sheet.swift', 'generate-brand.py', 'install-notarized.sh', 'notarize.sh',
          'export-source.py', 'test-export.py', 'stability-test.py')
 ICONS = ('Mark.svg', 'AppIcon.icon/icon.json', 'AppIcon.icon/Assets/back.svg',
          'AppIcon.icon/Assets/front.svg')

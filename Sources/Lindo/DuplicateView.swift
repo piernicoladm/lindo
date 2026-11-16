@@ -42,9 +42,9 @@ struct DuplicateView: View {
 
             if !(model.warnings[.duplicates] ?? []).isEmpty {
                 Button { model.showWarnings = true } label: {
-                    Label("Analisi parziale o elementi esclusi. Mostra dettagli", systemImage: "exclamationmark.triangle")
+                    Label("\(model.coverageNotice(for: .duplicates)). Mostra dettagli", systemImage: model.scanOutcome(for: .duplicates) == .excluded ? "info.circle" : "exclamationmark.triangle")
                         .font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
-                }.buttonStyle(.plain).foregroundStyle(.orange)
+                }.buttonStyle(.plain).foregroundStyle(model.scanOutcome(for: .duplicates) == .excluded ? Color.secondary : Color.orange)
             }
             if let notice = model.notice {
                 VStack(alignment: .leading, spacing: 4) {
@@ -80,7 +80,6 @@ struct DuplicateView: View {
         .onChange(of: model.searchFocusRequest) { _, _ in
             if model.sidebar == .duplicates && !model.duplicateGroups.isEmpty { searchFocused = true }
         }
-        .onChange(of: model.duplicateMinimumKB) { _, _ in model.clearResults(.duplicates) }
         .sheet(isPresented: $showFailures) { DetailsSheet(title: "Elementi non spostati", lines: model.failures) }
     }
 

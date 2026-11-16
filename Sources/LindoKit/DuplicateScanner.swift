@@ -19,6 +19,14 @@ public struct DuplicateReport: Sendable {
     public let isPartial: Bool
     public let cancelled: Bool
     public let duration: TimeInterval
+    public let coverage: ScanCoverage
+
+    public init(groups: [DuplicateGroup], warnings: [String], inspectedCount: Int, isPartial: Bool,
+                cancelled: Bool, duration: TimeInterval, coverage: ScanCoverage? = nil) {
+        self.groups = groups; self.warnings = warnings; self.inspectedCount = inspectedCount
+        self.isPartial = isPartial; self.cancelled = cancelled; self.duration = duration
+        self.coverage = coverage ?? ScanCoverage(hasUnplannedOmissions: isPartial)
+    }
 }
 
 private struct DuplicateIdentity: Equatable, Sendable {
@@ -207,6 +215,7 @@ public actor DuplicateScanner {
         let report = await base.scan(category: .largeFiles, roots: roots, minimumBytes: max(1, minimumBytes))
         var warnings = report.warnings, found: [DuplicateGroup] = [], saved: [String: DuplicateSnapshot] = [:]
         var cancelled = report.cancelled
+        var coverage = report.coverage
         do {
             try checkpoint(token)
             let sizes = Dictionary(grouping: report.items, by: \.bytes).values.filter { $0.count > 1 }
@@ -219,9 +228,9 @@ public actor DuplicateScanner {
                         let (value, hash) = try await fingerprint(item, token: token)
                         hashes[hash, default: []].append(value)
                     } catch DuplicateError.interrupted { throw DuplicateError.interrupted }
-                    catch DuplicateError.resourceFork { warnings.append("File escluso: \(item.title). Contiene un resource fork non confrontato.") }
+                    catch DuplicateError.resourceFork { coverage.exclude(); warnings.append("File escluso: \(item.title). Contiene un resource fork non confrontato.") }
                     catch ScanReadError.busy { throw ScanReadError.busy }
-                    catch { warnings.append("File modificato o non verificabile: \(item.title)") }
+                    catch { coverage.fail(); warnings.append("File modificato o non verificabile: \(item.title)") }
                 }
                 for (hash, values) in hashes where values.count > 1 {
                     var partitions: [[DuplicateSnapshot]] = []
@@ -245,13 +254,13 @@ public actor DuplicateScanner {
                 }
             }
             try checkpoint(token)
-        } catch DuplicateError.interrupted { cancelled = true; warnings.append("Ricerca duplicati interrotta.") }
-        catch ScanReadError.busy { warnings.append("Letture precedenti ancora in attesa del sistema. Riprova o scegli una cartella locale.") }
-        catch { warnings.append("Confronto interrotto: file modificato o non accessibile.") }
+        } catch DuplicateError.interrupted { cancelled = true; coverage.fail(); warnings.append("Ricerca duplicati interrotta.") }
+        catch ScanReadError.busy { coverage.fail(); warnings.append("Letture precedenti ancora in attesa del sistema. Riprova o scegli una cartella locale.") }
+        catch { coverage.fail(); warnings.append("Confronto interrotto: file modificato o non accessibile.") }
         if generation == token && !cancelled {
             groups = Dictionary(uniqueKeysWithValues: found.map { ($0.id, $0) }); snapshots = saved
         } else { found = [] }
-        return DuplicateReport(groups: found.sorted { $0.files[0].url.path < $1.files[0].url.path }, warnings: warnings, inspectedCount: report.inspectedCount, isPartial: report.isPartial || !warnings.isEmpty || cancelled, cancelled: cancelled, duration: Date().timeIntervalSince(started))
+        return DuplicateReport(groups: found.sorted { $0.files[0].url.path < $1.files[0].url.path }, warnings: warnings, inspectedCount: report.inspectedCount, isPartial: report.isPartial || !warnings.isEmpty || cancelled, cancelled: cancelled, duration: Date().timeIntervalSince(started), coverage: coverage)
     }
 
     private func validPair(_ candidate: DuplicateSnapshot, keeper: DuplicateSnapshot, token: UUID) async -> Bool {

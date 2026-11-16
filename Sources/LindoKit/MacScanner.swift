@@ -31,6 +31,14 @@ public struct ScanReport: Sendable {
     public let isPartial: Bool
     public let cancelled: Bool
     public let duration: TimeInterval
+    public let coverage: ScanCoverage
+
+    public init(items: [ScanItem], warnings: [String], inspectedCount: Int, isPartial: Bool,
+                cancelled: Bool, duration: TimeInterval, coverage: ScanCoverage? = nil) {
+        self.items = items; self.warnings = warnings; self.inspectedCount = inspectedCount
+        self.isPartial = isPartial; self.cancelled = cancelled; self.duration = duration
+        self.coverage = coverage ?? ScanCoverage(hasUnplannedOmissions: isPartial)
+    }
 }
 
 public struct RunningApplications: Sendable {
@@ -81,6 +89,7 @@ private struct Identity: Equatable, Sendable {
 }
 
 private enum TraversalError: Error { case limit }
+private enum ScanAvailability { case local, remote, unknown }
 
 private struct NodeKey: Hashable {
     let device: Int32
@@ -176,13 +185,19 @@ public actor MacScanner {
     }
 
     private nonisolated func placeholder(_ url: URL) -> Bool {
-        if url.lastPathComponent.hasSuffix(".icloud") { return true }
-        guard let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]) else { return true }
-        if values.isUbiquitousItem == true && values.ubiquitousItemDownloadingStatus != .current { return true }
+        availability(url) != .local
+    }
+
+    private nonisolated func availability(_ url: URL) -> ScanAvailability {
+        if url.lastPathComponent.hasSuffix(".icloud") { return .remote }
+        guard let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]) else { return .unknown }
+        if values.isUbiquitousItem == true && values.ubiquitousItemDownloadingStatus != .current {
+            return values.ubiquitousItemDownloadingStatus == nil ? .unknown : .remote
+        }
         var info = stat()
-        if lstat(url.path, &info) != 0 { return true }
+        if lstat(url.path, &info) != 0 { return .unknown }
         // SF_DATALESS: File Provider content is not materialized.
-        return info.st_flags & UInt32(0x40000000) != 0
+        return info.st_flags & UInt32(0x40000000) != 0 ? .remote : .local
     }
 
     private nonisolated func package(_ url: URL, isDirectory known: Bool? = nil) -> Bool {
@@ -273,24 +288,29 @@ public actor MacScanner {
         var items: [ScanItem] = [], warnings: [String] = []
         var count = 0, applicationDiscoveryCount = 0, limited = false
         var hiddenExclusions = 0, packageExclusions = 0
+        var coverage = ScanCoverage()
+        func warn(_ message: String, excluded: Int = 0) {
+            warnings.append(message)
+            if excluded > 0 { coverage.exclude(excluded) } else { coverage.fail() }
+        }
         // Only directories and multiply linked files can be reached twice.
         var visited: Set<NodeKey> = []
         let normalized = Array(Set(roots.map { onDiskSpelling($0) })).sorted { $0.path.count < $1.path.count }
         var accepted: [URL] = []
         for root in normalized {
             if !allowedRoot(root, category: category) {
-                warnings.append("Cartella esclusa o non accessibile: \(root.path)"); continue
+                warn("Cartella esclusa o non accessibile: \(root.path)"); continue
             }
             if !accepted.contains(where: { inside(root.path, $0.path) }) { accepted.append(root) }
         }
         for root in accepted {
-            guard let rootIdentity = try? identity(root) else { warnings.append("Cartella non più accessibile: \(root.path)"); continue }
+            guard let rootIdentity = try? identity(root) else { warn("Cartella non più accessibile: \(root.path)"); continue }
             // The same folder named twice, for example in another letter case, is scanned once.
             // A cache root is itself the first visited entry, so it is recorded by the walk below.
             guard category == .caches || visited.insert(NodeKey(device: rootIdentity.device, inode: rootIdentity.inode)).inserted else { continue }
             var stack: [URL] = []
             do { stack = category == .caches ? [root] : try directoryContents(root) }
-            catch { warnings.append("Impossibile leggere: \(root.path)"); continue }
+            catch { warn("Impossibile leggere: \(root.path)"); continue }
             while let url = stack.popLast() {
                 try cancellation.check()
                 if (category == .applications ? applicationDiscoveryCount : count) >= entryLimit { limited = true; break }
@@ -299,7 +319,7 @@ public actor MacScanner {
                 try cancellation.check()
                 guard inside(url.path, root.path) else { continue }
                 if protected(url) {
-                    warnings.append("Elemento escluso dalle protezioni: \(url.path)")
+                    warn("Elemento escluso dalle protezioni: \(url.path)", excluded: 1)
                     continue
                 }
                 if (category == .largeFiles || category == .logs), url.pathComponents.contains(where: { $0.hasPrefix(".") }) {
@@ -308,13 +328,18 @@ public actor MacScanner {
                 }
                 // A previously enumerated directory can now be a symlink. Recheck
                 // every ancestor before inspecting any queued child.
-                guard safeAncestors(url), !placeholder(url) else {
-                    warnings.append("Elemento escluso o non accessibile: \(url.path). Collegamento, contenuto non locale o percorso cambiato.")
+                guard safeAncestors(url) else {
+                    warn("Elemento escluso o non accessibile: \(url.path). Collegamento o percorso cambiato.")
+                    continue
+                }
+                let locality = availability(url)
+                guard locality == .local else {
+                    warn("Elemento escluso o non accessibile: \(url.path). Contenuto non locale o metadati non verificabili.", excluded: locality == .remote ? 1 : 0)
                     continue
                 }
                 let info: Identity
                 do { info = try identity(url) }
-                catch { warnings.append("Elemento non accessibile: \(url.path)"); continue }
+                catch { warn("Elemento non accessibile: \(url.path)"); continue }
                 if info.isDirectory || info.linkCount > 1 {
                     guard visited.insert(NodeKey(device: info.device, inode: info.inode)).inserted else { continue }
                 }
@@ -331,12 +356,12 @@ public actor MacScanner {
                             localCandidates[item.id] = Candidate(item: item, identity: info, root: root, rootIdentity: rootIdentity, appBundleIdentifier: owner.identifier, tree: tree)
                         } catch {
                             count = entryLimit - budget
-                            warnings.append("Cache esclusa: \(url.path). Contenuti non verificabili.")
+                            warn("Cache esclusa: \(url.path). Contenuti non verificabili.")
                             if error is TraversalError { limited = true; break }
                         }
                     } else if CachePolicy.mayTraverse(url, root: cacheRoot) {
                         do { stack.append(contentsOf: try directoryContents(url)) }
-                        catch { warnings.append("Impossibile leggere: \(url.path)") }
+                        catch { warn("Impossibile leggere: \(url.path)") }
                     }
                     continue
                 }
@@ -346,11 +371,11 @@ public actor MacScanner {
                         guard !package(url, isDirectory: true) else { continue }
                         let depth = url.pathComponents.count - root.pathComponents.count
                         guard depth <= 3 else {
-                            warnings.append("Sottocartella esclusa: \(url.path). Profondità massima raggiunta.")
+                            warn("Sottocartella esclusa: \(url.path). Profondità massima raggiunta.")
                             continue
                         }
                         do { stack.append(contentsOf: try directoryContents(url)) }
-                        catch { warnings.append("Impossibile leggere: \(url.path)") }
+                        catch { warn("Impossibile leggere: \(url.path)") }
                         continue
                     }
                     // Excluded bundles do not consume a whole-tree verification budget.
@@ -358,7 +383,7 @@ public actor MacScanner {
                     count += 1
                     // An unreadable identity cannot prove the bundle is third-party: exclude it.
                     guard !preview.identifier.isEmpty else {
-                        warnings.append("Applicazione esclusa: \(url.lastPathComponent). Identità del bundle non leggibile.")
+                        warn("Applicazione esclusa: \(url.lastPathComponent). Identità del bundle non leggibile.")
                         continue
                     }
                     guard !preview.identifier.hasPrefix("com.apple."), preview.identifier != "com.piernicolademaria.lindo" else { continue }
@@ -371,13 +396,13 @@ public actor MacScanner {
                         let metadata = applicationMetadata(url, tree: tree)
                         let version = metadata.version
                         guard metadata.identifier == preview.identifier else {
-                            warnings.append("Applicazione esclusa: \(url.lastPathComponent). Identità del bundle cambiata durante l'analisi.")
+                            warn("Applicazione esclusa: \(url.lastPathComponent). Identità del bundle cambiata durante l'analisi.")
                             continue
                         }
                         let item = ScanItem(id: UUID().uuidString, url: url, title: url.deletingPathExtension().lastPathComponent, bytes: size, modifiedAt: Date(timeIntervalSince1970: Double(info.modifiedSeconds)), category: category, detail: version, syncStatus: FileSyncPolicy.read(from: url, home: fm.homeDirectoryForCurrentUser.path))
                         items.append(item); localCandidates[item.id] = Candidate(item: item, identity: info, root: root, rootIdentity: rootIdentity, appBundleIdentifier: metadata.identifier, tree: tree)
                     } catch {
-                        warnings.append("Applicazione esclusa: \(url.lastPathComponent). Contenuti non verificabili o limite raggiunto.")
+                        warn("Applicazione esclusa: \(url.lastPathComponent). Contenuti non verificabili o limite raggiunto.")
                         count += entryLimit - budget
                         try cancellation.check()
                         // A single incomplete bundle must not hide other applications.
@@ -385,12 +410,15 @@ public actor MacScanner {
                     continue
                 }
                 if package(url, isDirectory: info.isDirectory) {
-                    packageExclusions += 1
+                    let knownPackage = ScanPathPolicy.packages.contains(url.pathExtension.lowercased())
+                        || (try? url.resourceValues(forKeys: [.isPackageKey]).isPackage) == true
+                    if knownPackage { packageExclusions += 1 }
+                    else { warn("Pacchetto escluso: \(url.path). Metadati non verificabili.") }
                     continue
                 }
                 if info.isDirectory {
                     do { stack.append(contentsOf: try directoryContents(url)) }
-                    catch { warnings.append("Impossibile leggere: \(url.path)") }
+                    catch { warn("Impossibile leggere: \(url.path)") }
                     continue
                 }
                 guard info.isRegular, info.size >= (category == .largeFiles ? max(0, minimumBytes) : 0) else { continue }
@@ -402,11 +430,11 @@ public actor MacScanner {
             }
             if limited { break }
         }
-        if hiddenExclusions > 0 { warnings.append("Elementi nascosti esclusi: \(hiddenExclusions). Il contenuto delle cartelle nascoste non è stato analizzato.") }
-        if packageExclusions > 0 { warnings.append("Pacchetti esclusi: \(packageExclusions). Il loro contenuto non è stato analizzato.") }
-        if limited { warnings.append("Limite di scansione raggiunto. Restringi la cartella selezionata.") }
+        if hiddenExclusions > 0 { warn("Elementi nascosti esclusi: \(hiddenExclusions). Il contenuto delle cartelle nascoste non è stato analizzato.", excluded: hiddenExclusions) }
+        if packageExclusions > 0 { warn("Pacchetti esclusi: \(packageExclusions). Il loro contenuto non è stato analizzato.", excluded: packageExclusions) }
+        if limited { warn("Limite di scansione raggiunto. Restringi la cartella selezionata.") }
         try cancellation.check()
-        return (ScanReport(items: items.sorted { $0.bytes > $1.bytes }, warnings: warnings, inspectedCount: count, isPartial: !warnings.isEmpty, cancelled: false, duration: Date().timeIntervalSince(started)), localCandidates)
+        return (ScanReport(items: items.sorted { $0.bytes > $1.bytes }, warnings: warnings, inspectedCount: count, isPartial: !warnings.isEmpty, cancelled: false, duration: Date().timeIntervalSince(started), coverage: coverage), localCandidates)
     }
 
     private nonisolated func cacheTree(_ root: URL, budget: inout Int, check: () throws -> Void = { try Task.checkCancellation() }) throws -> [String: Identity] {

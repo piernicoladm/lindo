@@ -10,8 +10,9 @@ public struct SpaceEntry: Identifiable, Sendable {
     public let isDirectory: Bool
     public let isPartial: Bool
     public let alreadyCountedLinks: Int
+    public let coverage: ScanCoverage
 
-    public init(id: String? = nil, url: URL, allocatedBytes: Int64, logicalBytes: Int64, fileCount: Int, isDirectory: Bool, isPartial: Bool, alreadyCountedLinks: Int = 0) {
+    public init(id: String? = nil, url: URL, allocatedBytes: Int64, logicalBytes: Int64, fileCount: Int, isDirectory: Bool, isPartial: Bool, alreadyCountedLinks: Int = 0, coverage: ScanCoverage? = nil) {
         self.id = id ?? url.path
         self.url = url
         self.allocatedBytes = allocatedBytes
@@ -20,6 +21,7 @@ public struct SpaceEntry: Identifiable, Sendable {
         self.isDirectory = isDirectory
         self.isPartial = isPartial
         self.alreadyCountedLinks = alreadyCountedLinks
+        self.coverage = coverage ?? ScanCoverage(hasUnplannedOmissions: isPartial)
     }
 }
 
@@ -34,8 +36,9 @@ public struct SpaceReport: Sendable {
     public let isPartial: Bool
     public let cancelled: Bool
     public let duration: TimeInterval
+    public let coverage: ScanCoverage
 
-    public init(root: URL, entries: [SpaceEntry], allocatedBytes: Int64, logicalBytes: Int64, fileCount: Int, inspectedCount: Int, warnings: [String], isPartial: Bool, cancelled: Bool, duration: TimeInterval) {
+    public init(root: URL, entries: [SpaceEntry], allocatedBytes: Int64, logicalBytes: Int64, fileCount: Int, inspectedCount: Int, warnings: [String], isPartial: Bool, cancelled: Bool, duration: TimeInterval, coverage: ScanCoverage? = nil) {
         self.root = root
         self.entries = entries
         self.allocatedBytes = allocatedBytes
@@ -46,6 +49,7 @@ public struct SpaceReport: Sendable {
         self.isPartial = isPartial
         self.cancelled = cancelled
         self.duration = duration
+        self.coverage = coverage ?? ScanCoverage(hasUnplannedOmissions: isPartial)
     }
 }
 
@@ -111,12 +115,14 @@ private struct SpaceTotals {
     var files = 0
     var alreadyCountedLinks = 0
     var partial = false
+    var coverage = ScanCoverage()
     mutating func add(_ other: SpaceTotals) {
         allocated += other.allocated
         logical += other.logical
         files += other.files
         alreadyCountedLinks += other.alreadyCountedLinks
         partial = partial || other.partial
+        coverage.merge(other.coverage)
     }
 }
 
@@ -137,6 +143,7 @@ private final class SpaceWalker {
     private var omittedWarnings = 0
     private let warningLimit = 200
     private var entries: [SpaceEntry] = []
+    private var coverage = ScanCoverage()
 
     init(root: URL, fixtureScopes: Bool, cancellation: ScanReadCancellation) {
         self.root = root
@@ -152,7 +159,8 @@ private final class SpaceWalker {
         return parts.contains(where: forbidden.contains) || zip(parts, parts.dropFirst()).contains(where: { $0 == "_2_work" && $1 == "clients" })
     }
 
-    private func warn(_ message: String) {
+    private func warn(_ message: String, excluded: Bool = false) {
+        if excluded { coverage.exclude() } else { coverage.fail() }
         if warnings.count < warningLimit { warnings.append(message) }
         else { omittedWarnings += 1 }
     }
@@ -202,7 +210,7 @@ private final class SpaceWalker {
     private func report(started: Date) -> SpaceReport {
         if omittedWarnings > 0 { warnings.append("Altre \(omittedWarnings) esclusioni o letture incomplete.") }
         let sorted = entries.sorted { $0.allocatedBytes == $1.allocatedBytes ? $0.url.path < $1.url.path : $0.allocatedBytes > $1.allocatedBytes }
-        return SpaceReport(root: root, entries: sorted, allocatedBytes: sorted.reduce(0) { $0 + $1.allocatedBytes }, logicalBytes: sorted.reduce(0) { $0 + $1.logicalBytes }, fileCount: sorted.reduce(0) { $0 + $1.fileCount }, inspectedCount: inspected, warnings: warnings, isPartial: !warnings.isEmpty || sorted.contains(where: \.isPartial), cancelled: false, duration: Date().timeIntervalSince(started))
+        return SpaceReport(root: root, entries: sorted, allocatedBytes: sorted.reduce(0) { $0 + $1.allocatedBytes }, logicalBytes: sorted.reduce(0) { $0 + $1.logicalBytes }, fileCount: sorted.reduce(0) { $0 + $1.fileCount }, inspectedCount: inspected, warnings: warnings, isPartial: !warnings.isEmpty || sorted.contains(where: \.isPartial), cancelled: false, duration: Date().timeIntervalSince(started), coverage: coverage)
     }
 
     /// Consumes the directory descriptor, including on errors or cancellation.
@@ -210,6 +218,7 @@ private final class SpaceWalker {
         guard let stream = fdopendir(descriptor) else {
             close(descriptor)
             totals.partial = true
+            totals.coverage.fail()
             warn("Impossibile leggere la cartella: \(directory.path)")
             return
         }
@@ -218,7 +227,7 @@ private final class SpaceWalker {
             try cancellation.check()
             errno = 0
             guard let record = readdir(stream) else {
-                if errno != 0 { totals.partial = true; warn("Lettura cartella incompleta: \(directory.path)") }
+                if errno != 0 { totals.partial = true; totals.coverage.fail(); warn("Lettura cartella incompleta: \(directory.path)") }
                 break
             }
             let name = withUnsafePointer(to: &record.pointee.d_name) {
@@ -228,17 +237,18 @@ private final class SpaceWalker {
             let url = directory.appendingPathComponent(name)
             if excluded(url) || name.hasSuffix(".icloud") {
                 totals.partial = true
-                warn("Elemento escluso dalla mappa spazio: \(url.path)")
+                totals.coverage.exclude()
+                warn("Elemento escluso dalla mappa spazio: \(url.path)", excluded: true)
                 continue
             }
             var info = stat()
             inspected += 1
             guard fstatat(dirfd(stream), name, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
-                totals.partial = true; warn("Metadati non accessibili: \(url.path)"); continue
+                totals.partial = true; totals.coverage.fail(); warn("Metadati non accessibili: \(url.path)"); continue
             }
             let kind = info.st_mode & S_IFMT
             guard kind == S_IFDIR || kind == S_IFREG, info.st_flags & UInt32(0x40000000) == 0 else {
-                totals.partial = true; warn("Collegamento, elemento speciale o contenuto non locale escluso: \(url.path)"); continue
+                totals.partial = true; totals.coverage.exclude(); warn("Collegamento, elemento speciale o contenuto non locale escluso: \(url.path)", excluded: true); continue
             }
             var child = SpaceTotals()
             if kind == S_IFREG && info.st_nlink > 1 && !hardlinks.insert(SpaceNode(device: info.st_dev, inode: info.st_ino)).inserted {
@@ -251,18 +261,18 @@ private final class SpaceWalker {
             }
             if kind == S_IFDIR {
                 if depth >= 64 {
-                    child.partial = true; warn("Profondità massima raggiunta: \(url.path)")
+                    child.partial = true; child.coverage.fail(); warn("Profondità massima raggiunta: \(url.path)")
                 } else {
                     let next = openat(dirfd(stream), name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
                     var opened = stat()
                     guard next >= 0 else {
-                        child.partial = true; warn("Cartella non accessibile: \(url.path)")
+                        child.partial = true; child.coverage.fail(); warn("Cartella non accessibile: \(url.path)")
                         totals.add(child)
                         if depth == 0 { append(url, info: info, totals: child) }
                         continue
                     }
                     guard fstat(next, &opened) == 0, opened.st_dev == info.st_dev, opened.st_ino == info.st_ino, opened.st_flags & UInt32(0x40000000) == 0 else {
-                        close(next); child.partial = true; warn("Cartella modificata durante la lettura: \(url.path)")
+                        close(next); child.partial = true; child.coverage.fail(); warn("Cartella modificata durante la lettura: \(url.path)")
                         totals.add(child)
                         if depth == 0 { append(url, info: info, totals: child) }
                         continue
@@ -276,6 +286,6 @@ private final class SpaceWalker {
     }
 
     private func append(_ url: URL, info: stat, totals: SpaceTotals) {
-        entries.append(SpaceEntry(url: url, allocatedBytes: totals.allocated, logicalBytes: totals.logical, fileCount: totals.files, isDirectory: info.st_mode & S_IFMT == S_IFDIR, isPartial: totals.partial, alreadyCountedLinks: totals.alreadyCountedLinks))
+        entries.append(SpaceEntry(url: url, allocatedBytes: totals.allocated, logicalBytes: totals.logical, fileCount: totals.files, isDirectory: info.st_mode & S_IFMT == S_IFDIR, isPartial: totals.partial, alreadyCountedLinks: totals.alreadyCountedLinks, coverage: totals.coverage))
     }
 }

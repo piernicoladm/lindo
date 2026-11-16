@@ -2,7 +2,7 @@
 
 Una piccola utility nativa per capire cosa occupa spazio sul Mac e scegliere cosa spostare nel Cestino. Gratuita e open source, senza account, telemetria o servizi in background. Interfaccia in italiano.
 
-**Stato: candidata 0.5.4, distribuzione del sorgente.** Le build di sviluppo non sono notarizzate. La CI pubblica documenta i controlli eseguiti; non sostituisce le prove sui dispositivi e sui servizi cloud reali.
+**Stato: candidata 0.6.0, distribuzione del sorgente.** Le build di sviluppo non sono notarizzate. La CI pubblica documenta i controlli eseguiti; non sostituisce le prove sui dispositivi e sui servizi cloud reali.
 
 ## Cosa puoi fare
 

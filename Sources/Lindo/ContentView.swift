@@ -81,7 +81,6 @@ struct ContentView: View {
                 }
             }
         }
-        .onChange(of: model.sidebar) { _, _ in model.pageChanged() }
         .sheet(isPresented: $model.showConfirmation) { ConfirmationView() }
         .sheet(isPresented: $model.showWarnings) {
             DetailsSheet(title: "Dettagli della scansione", lines: model.warnings[model.sidebar] ?? [])
@@ -168,15 +167,19 @@ struct OverviewView: View {
                     .foregroundStyle(.secondary).frame(width: 24)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(page.title).font(.body.weight(.medium))
-                    Text(description(page)).font(.caption).foregroundStyle(.secondary)
+                    Text(model.scopeDescription(for: page)).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(model.scopeDescription(for: page))
+                        .accessibilityIdentifier("scope-\(page.rawValue)")
                 }
                 Spacer(minLength: 16)
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(measurement(page)).font(.body).monospacedDigit()
                     Text(model.scanSummary(for: page)).font(.caption)
-                        .foregroundStyle(model.scanOutcome(for: page) == .complete ? Color.secondary : Color.primary)
+                        .foregroundStyle(model.scanOutcome(for: page) == .complete || model.scanOutcome(for: page) == .excluded ? Color.secondary : Color.primary)
                     LastScanLabel(date: model.scanDates[page], identifier: "last-scan-\(page.rawValue)")
                 }
+                .layoutPriority(1)
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
             }
             .padding(.vertical, 12)
@@ -185,17 +188,6 @@ struct OverviewView: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("open-\(page.rawValue)")
         .help("Apri \(page.title)")
-    }
-
-    private func description(_ page: SidebarItem) -> String {
-        switch page {
-        case .spaceMap: "Distribuzione dello spazio per cartella"
-        case .cleanup: "Cache web e log meno recenti"
-        case .largeFiles: "File oltre la dimensione scelta"
-        case .duplicates: "Copie con contenuto identico"
-        case .applications: "Applicazioni installate"
-        case .overview: ""
-        }
     }
 
     private func measurement(_ page: SidebarItem) -> String {

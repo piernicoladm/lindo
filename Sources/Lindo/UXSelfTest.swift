@@ -42,6 +42,8 @@ enum UXSelfTest {
         checks.append(("Removal context survives navigation", model.activityPage == .largeFiles))
         checks.append(("Navigation shortcuts follow sidebar order", SidebarItem.allCases == [.overview, .spaceMap, .cleanup, .largeFiles, .duplicates, .applications]))
         checks += ReviewSelfTest.run()
+        checks += ProductSelfTest.run()
+        checks += CoverageSelfTest.run()
         return checks
     }
 }

@@ -51,15 +51,15 @@ struct ResultsView: View {
             if let messages = model.warnings[model.sidebar], !messages.isEmpty {
                 Button { model.showWarnings = true } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle")
-                        Text("Copertura parziale o elementi esclusi").font(.callout)
+                        Image(systemName: model.scanOutcome(for: model.sidebar) == .excluded ? "info.circle" : "exclamationmark.triangle")
+                        Text(model.coverageNotice(for: model.sidebar)).font(.callout)
                         Spacer()
                         Text("Dettagli (\(messages.count))").font(.caption.weight(.medium))
                         Image(systemName: "chevron.right").font(.caption)
                     }.padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.orange)
+                .foregroundStyle(model.scanOutcome(for: model.sidebar) == .excluded ? Color.secondary : Color.orange)
             }
 
             if let notice = model.notice {
@@ -98,9 +98,6 @@ struct ResultsView: View {
             if [.cleanup, .largeFiles, .applications].contains(model.sidebar) && !model.currentItems.isEmpty { searchFocused = true }
         }
         .sheet(isPresented: $showFailures) { DetailsSheet(title: "Elementi non spostati", lines: model.failures) }
-        .onChange(of: model.minimumMB) { _, _ in
-            model.clearResults(.largeFiles)
-        }
     }
 
     private var emptyState: some View {

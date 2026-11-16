@@ -24,10 +24,12 @@ extension AppModel {
         items[page] = nil
         warnings[page] = nil
         scanDates[page] = nil
+        scannedScopes[page] = nil
         scanOutcomes[page] = nil
+        coverageByPage[page] = nil
         notices[page] = nil
         failuresByPage[page] = nil
-        selected.removeAll()
+        resetInteraction(for: page)
         if page == .duplicates {
             duplicateGroups = []
             duplicateKeepers = [:]
@@ -43,7 +45,7 @@ extension AppModel {
         let groupIDs = Set(duplicateGroups.map(\.id))
         duplicateKeepers = duplicateKeepers.filter { groupIDs.contains($0.key) }
         items[.duplicates] = duplicateGroups.flatMap(\.files)
-        selected.formIntersection(items[.duplicates, default: []].map(\.id))
+        setSelection(selection(for: .duplicates).intersection(items[.duplicates, default: []].map(\.id)), for: .duplicates)
     }
 
 }

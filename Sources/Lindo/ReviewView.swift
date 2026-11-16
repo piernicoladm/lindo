@@ -10,12 +10,38 @@ struct ConfirmationView: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Rivedi la selezione").font(.system(size: 20, weight: .semibold))
-                Text("Controlla i percorsi prima di spostare gli elementi nel Cestino.")
+                Text(model.reviewPage == .duplicates
+                     ? "\(model.reviewDuplicateGroups.count) \(model.reviewDuplicateGroups.count == 1 ? "gruppo" : "gruppi"): controlla cosa va nel Cestino e quali copie restano sul Mac."
+                     : "Controlla i percorsi prima di spostare gli elementi nel Cestino.")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
             }
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                if model.reviewPage == .duplicates {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.reviewDuplicateRows) { row in
+                            Group {
+                                switch row {
+                                case .group(_, let number):
+                                    Text("Gruppo \(number)")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.top, number == 1 ? 0 : 20)
+                                        .padding(.bottom, 4)
+                                case .section(_, let preserved, let count, let size):
+                                    reviewHeading(preserved ? "Restano sul Mac" : "Nel Cestino",
+                                                  symbol: preserved ? "lock.shield" : "trash", count: count, size: size)
+                                    Divider()
+                                case .file(let item, let protected):
+                                    reviewRow(item, protected: protected)
+                                    Divider()
+                                }
+                            }
+                            .onAppear { model.appearedReviewRows.insert(row.id) }
+                        }
+                    }
+                    .accessibilityIdentifier("review-duplicate-groups")
+                } else {
                     VStack(alignment: .leading, spacing: 0) {
                         reviewHeading("Nel Cestino", symbol: "trash", count: model.reviewItems.count, size: model.reviewBytes)
                         Divider()
@@ -23,20 +49,6 @@ struct ConfirmationView: View {
                             ForEach(model.reviewItems) { item in
                                 reviewRow(item)
                                 if item.id != model.reviewItems.last?.id { Divider() }
-                            }
-                        }
-                    }
-
-                    if model.reviewPage == .duplicates {
-                        VStack(alignment: .leading, spacing: 0) {
-                            reviewHeading("Restano sul Mac", symbol: "lock.shield", count: model.preservedReviewFiles.count,
-                                size: model.preservedReviewFiles.reduce(0) { $0 + $1.bytes })
-                            Divider()
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(model.preservedReviewFiles) { item in
-                                    reviewRow(item)
-                                    if item.id != model.preservedReviewFiles.last?.id { Divider() }
-                                }
                             }
                         }
                     }
@@ -96,11 +108,15 @@ struct ConfirmationView: View {
         }.padding(.vertical, 8)
     }
 
-    private func reviewRow(_ item: ScanItem) -> some View {
+    private func reviewRow(_ item: ScanItem, protected: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 Text(item.title).font(.system(size: 13, weight: .medium))
                 Spacer(minLength: 0)
+                if protected {
+                    Label("Copia protetta", systemImage: "lock.fill")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
                 Text(bytes(item.bytes)).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
                 Button { NSWorkspace.shared.activateFileViewerSelecting([item.url]) } label: {
                     Image(systemName: "folder")
