@@ -70,10 +70,10 @@ jobs:
           set -euo pipefail
           tools/test-release-safety.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/release-safety.log"
           tools/grid-lint.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/grid-lint.log"
-      - name: Verify release configuration builds
+      - name: Build and verify the staged app bundle
         run: |
           set -euo pipefail
-          swift build -c release --scratch-path "$RUNNER_TEMP/lindo-release-build" 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/release-build.log"
+          ./build.sh --no-install 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/release-build.log"
       - name: Retain source ZIP and synthetic evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
