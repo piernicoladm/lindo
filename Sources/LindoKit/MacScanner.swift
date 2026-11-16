@@ -90,6 +90,7 @@ private struct Identity: Equatable, Sendable {
 
 private enum TraversalError: Error { case limit }
 private enum ScanAvailability { case local, remote, unknown }
+private enum AncestorSafety { case safe, directLink, unverified }
 
 private struct NodeKey: Hashable {
     let device: Int32
@@ -158,11 +159,16 @@ public actor MacScanner {
     }
 
     private nonisolated func safeAncestors(_ url: URL) -> Bool {
+        ancestorSafety(url) == .safe
+    }
+
+    private nonisolated func ancestorSafety(_ url: URL) -> AncestorSafety {
         var cursor = url.standardizedFileURL
         while true {
-            guard let info = try? identity(cursor), info.mode & S_IFMT != S_IFLNK else { return false }
-            if cursor != url && package(cursor, isDirectory: info.isDirectory) { return false }
-            if cursor.path == "/" { return true }
+            guard let info = try? identity(cursor) else { return .unverified }
+            if info.mode & S_IFMT == S_IFLNK { return cursor == url.standardizedFileURL ? .directLink : .unverified }
+            if cursor != url && package(cursor, isDirectory: info.isDirectory) { return .unverified }
+            if cursor.path == "/" { return .safe }
             cursor.deleteLastPathComponent()
         }
     }
@@ -328,8 +334,9 @@ public actor MacScanner {
                 }
                 // A previously enumerated directory can now be a symlink. Recheck
                 // every ancestor before inspecting any queued child.
-                guard safeAncestors(url) else {
-                    warn("Elemento escluso o non accessibile: \(url.path). Collegamento o percorso cambiato.")
+                let ancestors = ancestorSafety(url)
+                guard ancestors == .safe else {
+                    warn("Elemento escluso o non accessibile: \(url.path). Collegamento o percorso cambiato.", excluded: ancestors == .directLink ? 1 : 0)
                     continue
                 }
                 let locality = availability(url)

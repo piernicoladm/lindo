@@ -39,5 +39,6 @@ func queuedScanChildrenRejectReplacedAncestors(depth: Int) async throws {
     #expect(destination == protectedTarget.path, "The test must actually replace the enumerated ancestor")
     #expect(report.items.isEmpty, "A queued child was accepted through a replaced ancestor")
     #expect(report.isPartial && !report.cancelled)
-    #expect(report.warnings.contains { $0.contains("Collegamento, contenuto non locale o percorso cambiato") })
+    #expect(report.coverage.hasUnplannedOmissions && report.coverage.excludedCount == 0)
+    #expect(report.warnings.contains { $0.contains(enumerated.appendingPathComponent("same-name.bin").path) })
 }

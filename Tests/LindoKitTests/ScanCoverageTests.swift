@@ -89,3 +89,32 @@ private func coverageWrite(_ root: URL, _ path: String) throws {
     #expect(combined.excludedCount == 5 && combined.hasUnplannedOmissions)
     #expect(ScanCoverage.combined([]) == ScanCoverage())
 }
+
+@Test func directSymlinkIsAPlannedExclusionButSymlinkRootIsRejected() async throws {
+    let root = try coverageFixture(); defer { try? FileManager.default.removeItem(at: root) }
+    try coverageWrite(root, "folder/visible.bin")
+    let link = root.appendingPathComponent("alias")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root.appendingPathComponent("folder"))
+    let scanner = MacScanner(trash: { _ in Issue.record("Read-only coverage test") })
+    let report = await scanner.scan(category: .largeFiles, roots: [root], minimumBytes: 1)
+    #expect(report.items.count == 1 && report.coverage.excludedCount == 1)
+    #expect(!report.coverage.hasUnplannedOmissions && report.warnings.contains { $0.contains("alias") })
+    let rejected = await scanner.scan(category: .largeFiles, roots: [link], minimumBytes: 1)
+    #expect(rejected.items.isEmpty && rejected.inspectedCount == 0 && rejected.coverage.hasUnplannedOmissions)
+    #expect(rejected.coverage.excludedCount == 0)
+}
+
+@Test func replacedAncestorCoverageRemainsUnverified() async throws {
+    let root = try coverageFixture(); defer { try? FileManager.default.removeItem(at: root) }
+    try coverageWrite(root, "queued/file.bin")
+    let queued = root.appendingPathComponent("queued")
+    let moved = root.appendingPathComponent("moved")
+    let scanner = MacScanner(afterDirectoryEnumeration: { directory in
+        guard directory.path == queued.path else { return }
+        try? FileManager.default.moveItem(at: queued, to: moved)
+        try? FileManager.default.createSymbolicLink(at: queued, withDestinationURL: moved)
+    }, trash: { _ in Issue.record("Read-only coverage test") })
+    let report = await scanner.scan(category: .largeFiles, roots: [root], minimumBytes: 1)
+    #expect(report.items.isEmpty && report.coverage.hasUnplannedOmissions)
+    #expect(report.coverage.excludedCount == 0 && report.warnings.contains { $0.contains("queued/file.bin") })
+}

@@ -265,10 +265,10 @@
       "sha256": "6f70121a50736b6f033b72dd1e2e38e4ae597fe668552687f2b4744de1633812"
     },
     {
-      "bytes": 37024,
+      "bytes": 37406,
       "mode": "0644",
       "path": "Sources/LindoKit/MacScanner.swift",
-      "sha256": "3bb4e839233836657548aa56db3c5890f5296c0f77917636467cae91d39c588c"
+      "sha256": "56f57318749b1ae60e187dec252e3ec85a80e23207119d0ec49d10f5eeacfd8f"
     },
     {
       "bytes": 4520,
@@ -367,10 +367,10 @@
       "sha256": "1fca3edbf7e75d0c63325c884cec7a620afb4d21ce77e91b4bf542855e6b45fa"
     },
     {
-      "bytes": 2606,
+      "bytes": 2694,
       "mode": "0644",
       "path": "Tests/LindoKitTests/ScanAncestorReplacementTests.swift",
-      "sha256": "bc74e3a1f06f82ad6fdf5ca1bb272a1fb86f8d2a66f34e7b5dd750f4e36b3f4a"
+      "sha256": "c109b2b1b997fd0fc48fd7a2de40b8d1e4ad14abe347e424ec3eabf578849bac"
     },
     {
       "bytes": 4409,
@@ -385,10 +385,10 @@
       "sha256": "3ce3d0e2bbc693550a9597a2e2b9f31a92f54335b26ddd9bb45186c67c839f1d"
     },
     {
-      "bytes": 5595,
+      "bytes": 7556,
       "mode": "0644",
       "path": "Tests/LindoKitTests/ScanCoverageTests.swift",
-      "sha256": "fc7047ea2dc7357d0059d1d41c3c414a70c08d4e4d52b014d4a7d44da7db3e79"
+      "sha256": "df7f82c36c2d11b9a58731be8a86e704e75c3f369df1314a24febc8be21eb8bc"
     },
     {
       "bytes": 15618,
