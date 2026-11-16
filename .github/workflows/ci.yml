@@ -1,0 +1,86 @@
+name: Build and synthetic safety checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: macOS 26 / Xcode ${{ matrix.xcode }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        xcode: ['26.0.1', '26.6']
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
+      LINDO_REAL_TRASH_TEST: '0'
+      LINDO_SCALE_TEST: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify toolchain
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          swift --version
+          mkdir -p "$RUNNER_TEMP/lindo-evidence"
+      - name: Verify source export boundaries
+        run: |
+          set -euo pipefail
+          python3 tools/test-export.py 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/export-tests.log"
+          python3 tools/export-source.py --output "$RUNNER_TEMP/Lindo-source" --zip "$RUNNER_TEMP/Lindo-source.zip" | tee "$RUNNER_TEMP/lindo-evidence/export.json"
+      - name: Test engine and app with synthetic data
+        run: |
+          set -euo pipefail
+          tools/selftest.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/selftest.log"
+      - name: Capture sample screens and verify layout geometry
+        if: matrix.xcode == '26.0.1'
+        run: |
+          set -euo pipefail
+          tools/snap.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/snapshots.log"
+          swift tools/check-layout.swift /tmp/Lindo-shots/*-layout.json 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/layout.log"
+      - name: Repeat adversarial and concurrency tests
+        run: |
+          set -euo pipefail
+          python3 tools/stability-test.py --iterations 20 --scratch-path "$HOME/Library/Developer/Lindo/test-build" --output "$RUNNER_TEMP/lindo-stability"
+      - name: Test release scripts without signing or installing
+        run: |
+          set -euo pipefail
+          tools/test-release-safety.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/release-safety.log"
+          tools/grid-lint.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/grid-lint.log"
+      - name: Verify release configuration builds
+        run: |
+          set -euo pipefail
+          swift build -c release --scratch-path "$RUNNER_TEMP/lindo-release-build" 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/release-build.log"
+      - name: Retain source ZIP and synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lindo-source-and-checks-xcode-${{ matrix.xcode }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/Lindo-source.zip
+            ${{ runner.temp }}/lindo-evidence/*.log
+            ${{ runner.temp }}/lindo-evidence/export.json
+            ${{ runner.temp }}/lindo-stability/*.json
+            ${{ runner.temp }}/lindo-stability/*.log
+            /tmp/Lindo-shots/*.png
+            /tmp/Lindo-shots/*-layout.json
