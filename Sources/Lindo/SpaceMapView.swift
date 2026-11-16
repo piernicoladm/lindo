@@ -116,6 +116,7 @@ struct SpaceMapView: View {
             }
         }
         .padding(.vertical, 4)
+        .gridProbe("space-map-notice", area: "space-map")
     }
 
     private func entries(_ report: SpaceReport) -> some View {

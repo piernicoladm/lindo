@@ -199,10 +199,10 @@
       "sha256": "b21103f9a68fe2250d0454ad137bedab5a424542e32ca71adade56dc7e4bf42a"
     },
     {
-      "bytes": 12546,
+      "bytes": 12604,
       "mode": "0644",
       "path": "Sources/Lindo/SpaceMapView.swift",
-      "sha256": "720d8725a304f4807f9c9b56ebb5a27630322d28755b185d121f3f073c2012ad"
+      "sha256": "5730dd0a8987d5bb4c07d5cd98fd39a56d5f015383f27034e533a77b2e46555b"
     },
     {
       "bytes": 3286,
