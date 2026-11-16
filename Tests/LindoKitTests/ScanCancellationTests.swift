@@ -22,10 +22,14 @@ private final class BlockedRead: @unchecked Sendable {
     private let lock = NSLock()
     private let gate = DispatchSemaphore(value: 0)
     private var entered = false
+    private var exited = false
     var didEnter: Bool { lock.lock(); defer { lock.unlock() }; return entered }
+    var didExit: Bool { lock.lock(); defer { lock.unlock() }; return exited }
     func block() {
         lock.lock(); entered = true; lock.unlock()
-        _ = gate.wait(timeout: .now() + 2)
+        // Watchdog only: successful cancellation must return before this read exits.
+        _ = gate.wait(timeout: .now() + 10)
+        lock.lock(); exited = true; lock.unlock()
     }
     func release() { gate.signal() }
 }
@@ -37,15 +41,15 @@ private final class BlockedRead: @unchecked Sendable {
         Issue.record("Read-only scan must never trash")
     })
     let task = Task { await scanner.scan(category: .largeFiles, roots: []) }
-    while !blocked.didEnter { try await Task.sleep(for: .milliseconds(1)) }
-    let start = ContinuousClock.now
+    defer { task.cancel() }
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while !blocked.didEnter && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+    try #require(blocked.didEnter)
     task.cancel()
     let report = await task.value
-    let elapsed = start.duration(to: .now)
     #expect(report.cancelled && report.isPartial)
     #expect(report.items.isEmpty)
-    #expect(elapsed < .milliseconds(250), "Cancellation waited for blocked filesystem: \(elapsed)")
-    print("SCAN_CANCEL_SECONDS=\(Double(elapsed.components.attoseconds) / 1e18 + Double(elapsed.components.seconds))")
+    #expect(!blocked.didExit, "Cancellation waited for the blocked filesystem worker")
 }
 
 @Test func duplicateCancellationReturnsDuringContentRead() async throws {
@@ -59,15 +63,15 @@ private final class BlockedRead: @unchecked Sendable {
     defer { blocked.release() }
     let scanner = DuplicateScanner(beforeContentRead: { blocked.block() }, trash: { _ in Issue.record("Unexpected trash") })
     let task = Task { await scanner.scan(roots: [root]) }
+    defer { task.cancel() }
     // A blocked content reader must not prevent cancellation or publish a group.
     let deadline = ContinuousClock.now.advanced(by: .seconds(5))
     while !blocked.didEnter && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
-    #expect(blocked.didEnter)
-    let start = ContinuousClock.now
+    try #require(blocked.didEnter)
     task.cancel()
     let report = await task.value
     #expect(report.cancelled && report.isPartial && report.groups.isEmpty)
-    #expect(start.duration(to: .now) < .milliseconds(250))
+    #expect(!blocked.didExit, "Cancellation waited for the blocked content reader")
 }
 
 @Test func cancelledReaderKeepsItsSlotUntilWorkerExits() async throws {
@@ -81,17 +85,22 @@ private final class BlockedRead: @unchecked Sendable {
             return 1
         }
     }
-    while !blocked.didEnter { try await Task.sleep(for: .milliseconds(1)) }
+    defer { task.cancel() }
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while !blocked.didEnter && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+    try #require(blocked.didEnter)
     task.cancel()
     do { _ = try await task.value; Issue.record("Expected cancellation") }
     catch is CancellationError { }
+    #expect(!blocked.didExit, "Cancellation waited for the blocked filesystem worker")
     do {
         _ = try await executor.run { _ in 2 }
         Issue.record("Cancelled OS worker must retain its slot")
     } catch ScanReadError.busy { }
     blocked.release()
     // Let the worker release its slot; no new thread or queued backlog is created.
-    for _ in 0..<100 {
+    let releaseDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while ContinuousClock.now < releaseDeadline {
         do { let value = try await executor.run { _ in 3 }; #expect(value == 3); return }
         catch ScanReadError.busy { try await Task.sleep(for: .milliseconds(1)) }
     }

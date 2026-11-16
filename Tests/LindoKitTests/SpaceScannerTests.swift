@@ -27,10 +27,14 @@ private final class SpaceBlockedRead: @unchecked Sendable {
     private let lock = NSLock()
     private let gate = DispatchSemaphore(value: 0)
     private var entered = false
+    private var exited = false
     var didEnter: Bool { lock.withLock { entered } }
+    var didExit: Bool { lock.withLock { exited } }
     func block() {
         lock.withLock { entered = true }
-        _ = gate.wait(timeout: .now() + 2)
+        // Watchdog only: successful cancellation must return before this read exits.
+        _ = gate.wait(timeout: .now() + 10)
+        lock.withLock { exited = true }
     }
     func release() { gate.signal() }
 }
@@ -151,12 +155,12 @@ private final class SpaceBlockedRead: @unchecked Sendable {
     let fixture = try SpaceFixture(); defer { fixture.clean() }
     let scanner = SpaceScanner(executor: ScanReadExecutor(limit: 1), beforeRead: { blocked.block() })
     let task = Task { await scanner.scan(root: fixture.root) }
+    defer { task.cancel() }
     let deadline = ContinuousClock.now.advanced(by: .seconds(5))
     while !blocked.didEnter && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
-    #expect(blocked.didEnter)
-    let start = ContinuousClock.now
+    try #require(blocked.didEnter)
     task.cancel()
     let report = await task.value
-    #expect(start.duration(to: .now) < .milliseconds(250))
+    #expect(!blocked.didExit, "Cancellation waited for the blocked filesystem worker")
     #expect(report.cancelled && report.isPartial && report.entries.isEmpty)
 }

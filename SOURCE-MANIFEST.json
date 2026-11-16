@@ -373,10 +373,10 @@
       "sha256": "c109b2b1b997fd0fc48fd7a2de40b8d1e4ad14abe347e424ec3eabf578849bac"
     },
     {
-      "bytes": 4409,
+      "bytes": 4976,
       "mode": "0644",
       "path": "Tests/LindoKitTests/ScanCancellationTests.swift",
-      "sha256": "dca48027cfe55a3a2b1230e3e042c618229e040cb31067916542754b5ad4b975"
+      "sha256": "221c6b03722c25fbb02a1f63f17939e9d0922218b851d1f2ef7b81d7fd4c8c35"
     },
     {
       "bytes": 5069,
@@ -397,10 +397,10 @@
       "sha256": "54730955e4830e4925a625a962fe5667f922cb4a8f69cc194d6c0b1116b6c4c6"
     },
     {
-      "bytes": 8281,
+      "bytes": 8515,
       "mode": "0644",
       "path": "Tests/LindoKitTests/SpaceScannerTests.swift",
-      "sha256": "45d61bb438dfb54604c4074c74bacd136353646e6e2b06c4f7d9e33b4ac7acdf"
+      "sha256": "4bcf4b29cea51db0a4a52077bf273d48b3b1e686b3fe999300f402e9a37bf0c6"
     },
     {
       "bytes": 4467,
