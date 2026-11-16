@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.piernicolademaria.lindo</string>
+<key>CFBundleName</key><string>Lindo</string>
+<key>CFBundleDisplayName</key><string>Lindo</string>
+<key>CFBundleExecutable</key><string>Lindo</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleIconName</key><string>AppIcon</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.5.4</string>
+<key>CFBundleVersion</key><string>__BUILD__</string>
+<key>LSMinimumSystemVersion</key><string>26.0</string>
+<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSPrincipalClass</key><string>NSApplication</string>
+<key>NSDocumentsFolderUsageDescription</key><string>Lindo misura i metadati dell’area che scegli per la mappa e analizza i file locali per trovare file grandi e duplicati. Nessun file viene rimosso senza la tua conferma.</string>
+<key>NSDownloadsFolderUsageDescription</key><string>Lindo misura i metadati dell’area che scegli per la mappa e analizza i file locali per trovare file grandi e duplicati. Nessun file viene rimosso senza la tua conferma.</string>
+<key>NSDesktopFolderUsageDescription</key><string>Lindo misura i metadati dell’area che scegli per la mappa e analizza i file locali per trovare file grandi e duplicati. Nessun file viene rimosso senza la tua conferma.</string>
+<key>NSFileProviderDomainUsageDescription</key><string>Lindo accede alla cartella cloud che scegli per trovare file grandi e duplicati locali. Non scarica i placeholder e non rimuove file senza la tua conferma.</string>
+<key>NSRemovableVolumesUsageDescription</key><string>Lindo analizza la cartella che scegli sul volume esterno per trovare file grandi e duplicati.</string>
+<key>NSNetworkVolumesUsageDescription</key><string>Lindo analizza la cartella che scegli sul volume di rete per trovare file grandi e duplicati.</string>
+</dict></plist>

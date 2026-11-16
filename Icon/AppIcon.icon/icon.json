@@ -1,0 +1,12 @@
+{
+  "fill": { "automatic-gradient": "srgb:0.28235,0.34902,0.90980,1.00000" },
+  "groups": [{
+    "layers": [
+      { "glass": true, "image-name": "back.svg", "name": "Lifted corner" },
+      { "glass": true, "image-name": "front.svg", "name": "Open sheet" }
+    ],
+    "shadow": { "kind": "neutral", "opacity": 0.35 },
+    "translucency": { "enabled": true, "value": 0.2 }
+  }],
+  "supported-platforms": { "squares": ["macOS"] }
+}
