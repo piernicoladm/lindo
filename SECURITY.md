@@ -10,6 +10,10 @@ Le rimozioni richiedono selezione, revisione e conferma. Prima del Cestino vengo
 
 Sono presenti esclusioni conservative per nome, incluse alcune cartelle di archivi privati. Non costituiscono un controllo di accesso generale: non usare i filtri dell'app come sostituto dei permessi del filesystem.
 
+## Modifiche ai bundle
+
+L’alleggerimento usa una copia privata sullo stesso volume. Ricontrolla bundle, firma e identità del codice conservato prima di proporre lo scambio. La sostituzione conserva l’originale come backup. Finché il backup o la sua copia nel Cestino occupano il volume, i byte dell’originale restano allocati. I bundle che richiederebbero una nuova firma vengono esclusi. Lo spazio necessario per la copia viene verificato prima di iniziare.
+
 ## Operazioni online e irreversibili
 
 Svuota Cestino chiede una conferma separata e usa Finder. Lo svuotamento può interessare più volumi montati. La rimozione di uno snapshot locale perde quel punto di ripristino. Per Mail e i provider cloud una modifica può sincronizzarsi con altri dispositivi. Archivi cloud rivalida identità e metadati del singolo file immediatamente prima della richiesta al provider. Conservazione, quota e tempi di ripristino dipendono dal servizio. Nel Finder “Rimuovi download” riguarda la copia locale.

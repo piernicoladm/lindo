@@ -1,12 +1,14 @@
 mod accounts;
 mod app_reset;
 mod assessment;
+mod bundle_trim;
 mod clutter;
 mod desktop;
 mod extras;
 mod file_versions;
 mod junk;
 mod legacy_junk;
+mod mail_trash;
 mod model;
 mod picker;
 mod policy;
@@ -14,6 +16,7 @@ mod remote;
 #[cfg(test)]
 mod responsiveness_tests;
 mod scan;
+mod system_junk;
 mod system_tools;
 mod trash;
 mod treemap;
@@ -73,6 +76,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some("--version") => println!("Lindo {}", env!("CARGO_PKG_VERSION")),
         Some("--selftest") => selftest()?,
+        #[cfg(feature = "ui-probe")]
+        Some("--menu-probe") => ui::launch_menu_fixture()?,
         #[cfg(feature = "ui-probe")]
         Some("--ui-probe") => {
             let mode = match args.next().as_deref().and_then(|a| a.to_str()) {

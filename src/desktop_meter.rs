@@ -153,7 +153,7 @@ fn battery(text: &str) -> Option<String> {
         return text
             .lines()
             .any(|l| l.starts_with("Now drawing from "))
-            .then(|| "Batteria interna non rilevata".into());
+            .then(|| "Batteria · nessuna batteria interna rilevata".into());
     };
     if internal.next().is_some() {
         return None;
@@ -363,7 +363,7 @@ mod tests {
     fn battery_distinguishes_absence_malformed_values_and_zero_percent() {
         assert_eq!(
             battery("Now drawing from 'AC Power'").as_deref(),
-            Some("Batteria interna non rilevata")
+            Some("Batteria · nessuna batteria interna rilevata")
         );
         assert!(battery("unknown").is_none());
         assert_eq!(

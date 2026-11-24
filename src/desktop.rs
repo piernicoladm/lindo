@@ -1,5 +1,8 @@
 #[path = "desktop_meter.rs"]
 mod desktop_meter;
+#[cfg(feature = "ui-probe")]
+#[path = "menu_probe.rs"]
+mod menu_probe;
 use eframe::egui;
 use objc2::{rc::Retained, MainThreadMarker};
 use objc2_app_kit::{NSMenu, NSStatusBar, NSStatusItem};
@@ -22,10 +25,36 @@ pub(crate) struct Desktop {
     cover_until: Option<Instant>,
     previous_fullscreen: bool,
     keyboard_requested: bool,
+    keep_monitor: bool,
     keyboard: Option<keyboard::Lock>,
 }
 
 impl Desktop {
+    #[cfg(feature = "ui-probe")]
+    pub(crate) fn start_menu_probe(&mut self, ctx: &egui::Context) {
+        self.set_meter(true, ctx, None);
+        self.keep_monitor = true;
+        menu_probe::start(self.meter.as_ref().expect("main-thread menu").item.clone());
+    }
+
+    fn set_meter(&mut self, enabled: bool, ctx: &egui::Context, disk: Option<(u64, u64)>) {
+        if enabled {
+            if let Some(main) = MainThreadMarker::new() {
+                let item = NSStatusBar::systemStatusBar().statusItemWithLength(-1.);
+                if let Some(btn) = item.button(main) {
+                    btn.setTitle(&NSString::from_str("Lindo"));
+                }
+                self.meter = Some(MenuMeter {
+                    sampler: desktop_meter::Sampler::start(ctx),
+                    item,
+                    next: Instant::now(),
+                });
+                self.update_menu(disk);
+            }
+        } else {
+            self.meter = None;
+        }
+    }
     fn update_menu(&mut self, disk: Option<(u64, u64)>) {
         let Some(meter) = self.meter.as_mut() else {
             return;
@@ -53,13 +82,20 @@ impl Desktop {
                 );
             }
         }
-        // arrangeInFront: is the standard NSApplication action for showing its windows.
-        unsafe {
-            menu.addItemWithTitle_action_keyEquivalent(
-                &NSString::from_str("Mostra Lindo"),
-                Some(objc2::sel!(arrangeInFront:)),
-                &NSString::from_str(""),
-            );
+        let app = objc2_app_kit::NSApplication::sharedApplication(main);
+        for (label, action) in [
+            ("Mostra Lindo", objc2::sel!(unhide:)),
+            ("Esci da Lindo", objc2::sel!(terminate:)),
+        ] {
+            // NSApplication owns both documented actions and outlives the weak menu target.
+            unsafe {
+                let item = menu.addItemWithTitle_action_keyEquivalent(
+                    &NSString::from_str(label),
+                    Some(action),
+                    &NSString::from_str(""),
+                );
+                item.setTarget(Some(&app));
+            }
         }
         meter.item.setMenu(Some(&menu));
         meter.next = Instant::now() + desktop_meter::PERIOD;
@@ -70,6 +106,15 @@ impl Desktop {
             .is_some_and(|m| Instant::now() >= m.next || m.sampler.ready())
     }
     pub(crate) fn refresh(&mut self, ctx: &egui::Context, disk: Option<(u64, u64)>) {
+        if self.keep_monitor
+            && self.meter.is_some()
+            && ctx.input(|i| i.viewport().close_requested())
+        {
+            if let Some(main) = MainThreadMarker::new() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                objc2_app_kit::NSApplication::sharedApplication(main).hide(None);
+            }
+        }
         if self.refresh_due() {
             self.update_menu(disk);
         }
@@ -89,27 +134,14 @@ impl Desktop {
                 .checkbox(&mut enabled, "Monitor nella barra dei menu")
                 .changed()
             {
-                if enabled {
-                    if let Some(main) = MainThreadMarker::new() {
-                        let item = NSStatusBar::systemStatusBar().statusItemWithLength(-1.);
-                        if let Some(btn) = item.button(main) {
-                            btn.setTitle(&NSString::from_str("Lindo"));
-                        }
-                        self.meter = Some(MenuMeter {
-                            sampler: desktop_meter::Sampler::start(ctx),
-                            item,
-                            next: Instant::now(),
-                        });
-                        self.update_menu(disk);
-                    }
-                } else {
-                    self.meter = None;
-                }
+                self.set_meter(enabled, ctx, disk);
             }
             ui.checkbox(&mut self.keyboard_requested,"Blocca anche la tastiera")
                 .on_hover_text("Opzionale. Richiede l’autorizzazione Accessibilità di macOS. La tastiera viene sbloccata dopo 45 secondi, con Esc o con un clic.");
-            if ui
-                .button("Pulisci lo schermo")
+            if enabled {
+                ui.checkbox(&mut self.keep_monitor, "Tieni il monitor attivo a finestra chiusa").on_hover_text("Mostra Lindo o esci dal menu nella barra di macOS.");
+            }
+            if ui.button("Pulisci lo schermo")
                 .on_hover_text("Schermo nero per 45 secondi. Premi Esc o fai clic per tornare.")
                 .clicked()
             {

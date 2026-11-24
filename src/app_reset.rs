@@ -239,7 +239,19 @@ pub(crate) fn verified_domain_for_cleanup(
     signed_app(path, stop).map(|app| (app.id, app.team, app.hash))
 }
 
+pub(crate) fn verified_bundle_for_trim(
+    path: &Path,
+    stop: &AtomicBool,
+) -> Result<(String, String, String)> {
+    // Bundle thinning only touches the staged copy. Sandboxed preferences are not involved.
+    signed_app_for(path, stop, false).map(|app| (app.id, app.team, app.hash))
+}
+
 fn signed_app(p: &Path, stop: &AtomicBool) -> Result<App> {
+    signed_app_for(p, stop, true)
+}
+
+fn signed_app_for(p: &Path, stop: &AtomicBool, preference_cleanup: bool) -> Result<App> {
     let home = policy::home();
     if !app_path(&home, p)
         || fs::canonicalize(p).ok().as_deref() != Some(p)
@@ -263,7 +275,7 @@ fn signed_app(p: &Path, stop: &AtomicBool) -> Result<App> {
         &["--display", "--entitlements", "-", "--xml", path],
         stop,
     )?;
-    if entitlements.contains("com.apple.security.app-sandbox") {
+    if preference_cleanup && entitlements.contains("com.apple.security.app-sandbox") {
         return Err("App sandbox escluse dal reset.".into());
     }
     let details = tool(

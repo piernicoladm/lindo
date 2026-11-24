@@ -6,7 +6,7 @@ Lindo 0.8.0 è una utility macOS scritta in Rust per individuare cosa occupa spa
 
 - Apri la mappa proporzionale per esplorare una cartella. Salva la misura per confrontarla con una scansione successiva nella stessa sessione.
 - Trova duplicati esatti, file grandi o vecchi, installatori, archivi e immagini JPEG, PNG o HEIC simili. Per le immagini puoi esaminare i percorsi e scegliere quali copie mettere nel Cestino.
-- Esamina cache di sviluppo, modelli AI, backup iOS, app e relativi file riconosciuti. Puoi ripristinare le preferenze di un’app verificata o esaminare le revisioni di un documento locale. La revisione mostra gli elementi selezionati e la copia protetta di ogni gruppo.
+- Esamina cache di sviluppo, modelli AI, backup iOS, app e relativi file riconosciuti. Per app universali idonee puoi creare una copia più leggera mantenendo la firma dell’editore. Puoi ripristinare le preferenze di un’app verificata o esaminare le revisioni di un documento locale. La revisione mostra gli elementi selezionati e la copia protetta di ogni gruppo.
 - Gestisci le copie locali degli allegati di Apple Mail, i messaggi selezionati, i link di disiscrizione e le schede duplicate di Chrome. Su iCloud puoi liberare un download già sincronizzato.
 - Apri Archivi cloud per consultare quota e cartelle remote di Dropbox, Google Drive e OneDrive tramite rclone. Spostamento in una cartella di revisione e rimozione online sono azioni distinte.
 - Consulta volumi, snapshot Time Machine, risorse, avvii automatici e aggiornamenti. Gli strumenti di manutenzione richiedono conferma. Per le azioni privilegiate la richiesta di autorizzazione viene da macOS.
