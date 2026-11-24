@@ -52,6 +52,11 @@ def main():
         run(binary, "space", flat, args.flat_files, 0, args.flat_files, 120)
         run(binary, "duplicates", duplicates, args.copies, 1, args.copies, 120)
 
+    menu = subprocess.run([binary, "--menu-probe"], capture_output=True, text=True, timeout=45)
+    if menu.returncode or "LINDO_MENU_QA ok=true" not in menu.stdout:
+        raise SystemExit(f"Menu lifecycle failed ({menu.returncode}): {menu.stdout} {menu.stderr}")
+    print("LINDO_MENU_QA ok=true", flush=True)
+
 
 if __name__ == "__main__":
     main()

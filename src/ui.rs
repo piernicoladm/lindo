@@ -493,8 +493,11 @@ enum Extra {
     Reset,
     Versions,
     Legacy,
+    MailTrash,
+    SystemJunk,
+    Trim,
 }
-const EXTRAS: [(Extra, &str); 9] = [
+const EXTRAS: [(Extra, &str); 12] = [
     (Extra::Clutter, "Download e immagini"),
     (Extra::Junk, "Pulizia avanzata"),
     (Extra::System, "Strumenti di sistema"),
@@ -504,6 +507,9 @@ const EXTRAS: [(Extra, &str); 9] = [
     (Extra::Reset, "Ripristino app"),
     (Extra::Versions, "Revisioni documento"),
     (Extra::Legacy, "Preferenze e avvii obsoleti"),
+    (Extra::MailTrash, "Cestino di Mail"),
+    (Extra::SystemJunk, "Cache e log di sistema"),
+    (Extra::Trim, "Alleggerisci un’app"),
 ];
 
 struct Lindo {
@@ -512,6 +518,9 @@ struct Lindo {
     reset: crate::app_reset::AppReset,
     versions: crate::file_versions::FileVersions,
     legacy: crate::legacy_junk::LegacyJunk,
+    trim: crate::bundle_trim::BundleTrim,
+    mail_trash: crate::mail_trash::MailTrash,
+    system_junk: crate::system_junk::SystemJunk,
     vendor: crate::vendor_updates::VendorUpdates,
     remote: crate::remote::Remote,
     accounts: crate::accounts::Accounts,
@@ -540,6 +549,7 @@ struct Lindo {
     failures: Vec<String>,
     disk: Option<(u64, u64)>,
     disk_pending: bool,
+    disk_measured: std::time::Instant,
     filtering: bool,
     fixture: Option<Fixture>,
 }
@@ -593,6 +603,9 @@ impl Lindo {
             reset: Default::default(),
             versions: Default::default(),
             legacy: Default::default(),
+            trim: Default::default(),
+            mail_trash: Default::default(),
+            system_junk: Default::default(),
             vendor: Default::default(),
             remote: Default::default(),
             accounts: Default::default(),
@@ -620,6 +633,7 @@ impl Lindo {
             failures: vec![],
             disk: None,
             disk_pending: true,
+            disk_measured: std::time::Instant::now(),
             filtering: false,
             fixture: None,
         }
@@ -682,6 +696,7 @@ impl Lindo {
                 Event::Disk(value) => {
                     self.disk = value;
                     self.disk_pending = false;
+                    self.disk_measured = std::time::Instant::now();
                 }
                 Event::Reveal(result) => {
                     self.revealing = false;
@@ -845,10 +860,34 @@ impl Lindo {
         });
     }
 
+    fn request_disk_usage(&mut self, ctx: &egui::Context) {
+        if self.disk_pending {
+            return;
+        }
+        self.disk_pending = true;
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::Disk(disk_usage()));
+            ctx.request_repaint();
+        });
+    }
+
     fn overview(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.heading("Panoramica");
         ui.add_space(12.0);
-        ui.strong("Disco dell’utente");
+        ui.horizontal(|ui| {
+            ui.strong("Disco dell’utente");
+            if ui
+                .add_enabled(
+                    !self.disk_pending,
+                    egui::Button::new("Aggiorna spazio").small(),
+                )
+                .clicked()
+            {
+                self.request_disk_usage(ctx);
+            }
+        });
         if let Some((total, free)) = self.disk {
             let used = total.saturating_sub(free);
             ui.label(format!("{} disponibili su {}", size(free), size(total)));
@@ -926,6 +965,9 @@ impl Lindo {
                     Extra::Legacy => {
                         "Preferenze danneggiate, agenti di avvio non più presenti e account rimossi"
                     }
+                    Extra::Trim => "Alleggerimento controllato di app universali, architettura Intel e lingue",
+                    Extra::MailTrash => "Messaggi nel cestino di un singolo account Apple Mail",
+                    Extra::SystemJunk => "Pulizia selettiva di log archiviati e cache rigenerabili in Library del Mac",
                     Extra::Junk => "Cache di sviluppo e AI, disinstallazione, backup iOS e residui",
                     Extra::System => {
                         "Volumi, snapshot, aggiornamenti, malware, manutenzione, login e Cestino"
@@ -1579,14 +1621,11 @@ impl eframe::App for Lindo {
         if self.desktop.cover(ctx) {
             return;
         }
-        if self.desktop.refresh_due() && !self.disk_pending {
-            self.disk_pending = true;
-            let tx = self.tx.clone();
-            let ctx = ctx.clone();
-            std::thread::spawn(move || {
-                let _ = tx.send(Event::Disk(disk_usage()));
-                ctx.request_repaint();
-            });
+        let overview_visible = self.mode.is_none() && self.extra.is_none() && self.review.is_none();
+        if self.desktop.refresh_due()
+            || (overview_visible && self.disk_measured.elapsed() >= Duration::from_secs(30))
+        {
+            self.request_disk_usage(ctx);
         }
         self.receive();
         self.system.monitor_alert(ctx);
@@ -1650,7 +1689,15 @@ impl eframe::App for Lindo {
                     }
                     ui.separator();
                     for (extra, label) in EXTRAS {
-                        if matches!(extra, Extra::Reset | Extra::Versions | Extra::Legacy) {
+                        if matches!(
+                            extra,
+                            Extra::Reset
+                                | Extra::Versions
+                                | Extra::Legacy
+                                | Extra::MailTrash
+                                | Extra::SystemJunk
+                                | Extra::Trim
+                        ) {
                             continue;
                         }
                         if ui
@@ -1758,6 +1805,9 @@ impl eframe::App for Lindo {
                             self.extra = None;
                             self.mode = Some(Mode::Apps);
                         }
+                        if ui.small_button("Alleggerisci un’app…").clicked() {
+                            self.extra = Some(Extra::Trim);
+                        }
                         self.reset.show(ui, ctx);
                         None
                     }
@@ -1777,15 +1827,44 @@ impl eframe::App for Lindo {
                         self.remote.show(ui, ctx);
                         None
                     }
+                    Extra::Trim => {
+                        if ui.small_button("‹ Ripristino app").clicked() {
+                            self.extra = Some(Extra::Reset);
+                        }
+                        self.trim.show(ui, ctx);
+                        None
+                    }
+                    Extra::MailTrash => {
+                        if ui.small_button("‹ Mail e browser").clicked() {
+                            self.extra = Some(Extra::Accounts);
+                        }
+                        self.mail_trash.show(ui, ctx);
+                        None
+                    }
+                    Extra::SystemJunk => {
+                        if ui.small_button("‹ Pulizia avanzata").clicked() {
+                            self.extra = Some(Extra::Junk);
+                        }
+                        self.system_junk.show(ui, ctx);
+                        None
+                    }
                     Extra::Accounts => {
+                        if ui.small_button("Cestino di Mail…").clicked() {
+                            self.extra = Some(Extra::MailTrash);
+                        }
                         self.accounts.show(ui, ctx);
                         None
                     }
                     Extra::Clutter => self.clutter.show(ui, ctx),
                     Extra::Junk => {
-                        if ui.small_button("Preferenze e avvii obsoleti…").clicked() {
-                            self.extra = Some(Extra::Legacy);
-                        }
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.small_button("Preferenze e avvii obsoleti…").clicked() {
+                                self.extra = Some(Extra::Legacy);
+                            }
+                            if ui.small_button("Cache e log di sistema…").clicked() {
+                                self.extra = Some(Extra::SystemJunk);
+                            }
+                        });
                         self.junk.show(ui, ctx)
                     }
                     Extra::Legacy => {
@@ -1831,7 +1910,11 @@ impl Drop for Lindo {
     }
 }
 
-fn run_window(fixture: Option<(PathBuf, Mode)>, appearance: Option<egui::Theme>) -> eframe::Result {
+fn run_window(
+    fixture: Option<(PathBuf, Mode)>,
+    appearance: Option<egui::Theme>,
+    setup: Option<fn(&mut Lindo, &egui::Context)>,
+) -> eframe::Result {
     let window_start = fixture.as_ref().map(|_| std::time::Instant::now());
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -1864,17 +1947,29 @@ fn run_window(fixture: Option<(PathBuf, Mode)>, appearance: Option<egui::Theme>)
                     ..Default::default()
                 });
             }
+            if let Some(start) = setup {
+                start(&mut app, &cc.egui_ctx);
+            }
             Ok(Box::new(app))
         }),
     )
 }
 
 pub fn launch(appearance: Option<egui::Theme>) -> eframe::Result {
-    run_window(None, appearance)
+    run_window(None, appearance, None)
 }
 #[cfg(feature = "ui-probe")]
+pub fn launch_menu_fixture() -> eframe::Result {
+    run_window(
+        None,
+        None,
+        Some(|app, ctx| app.desktop.start_menu_probe(ctx)),
+    )
+}
+
+#[cfg(feature = "ui-probe")]
 pub fn launch_fixture(path: PathBuf, mode: Mode) -> eframe::Result {
-    run_window(Some((path, mode)), None)
+    run_window(Some((path, mode)), None, None)
 }
 
 #[cfg(test)]
