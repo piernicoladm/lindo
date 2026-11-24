@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-const MAX_FILE: u64 = 64 * 1024 * 1024;
+pub(super) const MAX_FILE: u64 = 64 * 1024 * 1024;
 const MAX_FILES: usize = 2_000;
 const MAX_ENTRIES: usize = 20_000;
 
-fn permitted(path: &Path) -> bool {
+pub(super) fn permitted(path: &Path) -> bool {
     policy::allowed_root(Mode::Large, path)
         && !policy::cloud(path)
         && !path.components().any(|c| {
@@ -23,7 +23,7 @@ fn permitted(path: &Path) -> bool {
         })
 }
 
-fn local_handle(path: &Path, directory: bool) -> Result<File, String> {
+pub(super) fn local_handle(path: &Path, directory: bool) -> Result<File, String> {
     if !permitted(path) {
         return Err("Percorso cloud o protetto.".into());
     }
@@ -176,14 +176,7 @@ pub(super) fn scan(path: &Path, cancel: &AtomicBool) -> Result<(String, Vec<Find
             invoke(scanner, file, cancel, seconds)
         })
     } else {
-        let input = local_handle(path, false)?;
-        let finding = Finding::capture(path, &input)?;
-        let result = invoke(scanner, input, cancel, 180)?;
-        let findings = if result.code == Some(1) {
-            vec![finding]
-        } else {
-            Vec::new()
-        };
+        let (result, finding) = inspect_file(scanner, path, cancel)?;
         Ok((
             format!(
                 "{}\n{}\n\n{}",
@@ -191,9 +184,26 @@ pub(super) fn scan(path: &Path, cancel: &AtomicBool) -> Result<(String, Vec<Find
                 verdict(&result),
                 result.text
             ),
-            findings,
+            finding.into_iter().collect(),
         ))
     }
+}
+
+pub(super) fn inspect_file(
+    scanner: &str,
+    path: &Path,
+    cancel: &AtomicBool,
+) -> Result<(command::Output, Option<Finding>), String> {
+    let input = local_handle(path, false)?;
+    let finding = Finding::capture(path, &input)?;
+    let result = invoke(scanner, input, cancel, 180)?;
+    let detected = if result.code == Some(1) {
+        finding.validate(&local_handle(path, false)?)?;
+        Some(finding)
+    } else {
+        None
+    };
+    Ok((result, detected))
 }
 
 fn scan_tree(

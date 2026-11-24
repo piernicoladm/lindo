@@ -4,6 +4,9 @@ use std::sync::atomic::AtomicBool;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Mutation {
     FlushDns,
+    PurgeBuffers,
+    ThinSnapshots,
+    ResetUserPermissions,
     Spotlight,
     EmptyTrash,
     Detected(super::security_scan::Finding),
@@ -15,6 +18,9 @@ impl Mutation {
     pub(super) fn label(&self) -> String {
         match self {
             Self::Brew { name, .. } => format!("Aggiorna {name}"),
+            Self::PurgeBuffers => "Rilascia cache RAM del disco".into(),
+            Self::ThinSnapshots => "Riduci snapshot locali (1 GiB)".into(),
+            Self::ResetUserPermissions => "Ripristina permessi della cartella utente".into(),
             Self::FlushDns => "Svuota cache DNS".into(),
             Self::Spotlight => "Ricostruisci indice Spotlight".into(),
             Self::Detected(f) => format!("Sposta nel Cestino {}", f.path.display()),
@@ -25,6 +31,9 @@ impl Mutation {
     pub(super) fn explanation(&self) -> &'static str {
         match self {
             Self::Brew { .. } => "Homebrew scaricherà e installerà il pacchetto selezionato e le dipendenze necessarie. Chiudi l’app prima di procedere. Se interrompi l’operazione, ricontrolla lo stato del pacchetto.",
+            Self::PurgeBuffers => "macOS rilascerà la cache in RAM usata per il disco. Le prime letture potranno essere più lente. La quantità liberata dipende dal sistema.",
+            Self::ThinSnapshots => "Time Machine sceglierà quali snapshot locali eliminare per tentare di liberare 1 GiB sul disco di avvio. La rimozione dei punti di ripristino locali è definitiva. La quantità liberata può essere inferiore.",
+            Self::ResetUserPermissions => "diskutil ripristinerà i permessi della cartella Home dell’utente corrente sul disco di avvio. Questa operazione può modificare permessi personalizzati. Usala solo per correggere un problema di accesso.",
             Self::FlushDns => "macOS richiederà l’autorizzazione amministratore per svuotare la cache DNS e ricaricare il resolver. Le prossime richieste ripeteranno la risoluzione dei nomi.",
             Self::Spotlight => "macOS richiederà l’autorizzazione per ricostruire l’indice del disco di avvio. I risultati di ricerca saranno temporaneamente incompleti. L’indicizzazione prosegue in macOS.",
             Self::Detected(_) => "Lindo ricontrollerà l’identità del file e ripeterà la scansione. Se ClamAV conferma la rilevazione, il singolo file verrà spostato nel Cestino di macOS.",
@@ -74,6 +83,23 @@ pub(super) fn apply(
     mut run: impl FnMut(&str, &[&str], u64) -> Result<command::Output, String>,
 ) -> Result<String, String> {
     let (script, success) = match action {
+        Mutation::PurgeBuffers => (r#"do shell script "/usr/sbin/purge" with administrator privileges"#.into(),
+            "macOS ha completato il rilascio della cache disco in RAM."),
+        Mutation::ThinSnapshots => {
+            let list = run("/usr/bin/tmutil", &["listlocalsnapshots", "/"], 30)?;
+            if list.code != Some(0) || list.truncated || snapshots(&list.text).is_empty() {
+                return Err("Nessuno snapshot locale verificabile da ridurre.".into());
+            }
+            (r#"do shell script "/usr/bin/tmutil thinlocalsnapshots / 1073741824 1" with administrator privileges"#.into(),
+             "Time Machine ha completato la richiesta di riduzione. Ricontrolla lo spazio disponibile.")
+        }
+        Mutation::ResetUserPermissions => {
+            // Pass the current real numeric UID. No user-supplied shell operand is accepted.
+            let uid = unsafe { libc::getuid() };
+            if uid == 0 { return Err("Avvia Lindo con il tuo utente.".into()); }
+            (format!(r#"do shell script "/usr/sbin/diskutil resetUserPermissions / {uid}" with administrator privileges"#),
+                "macOS ha completato il ripristino dei permessi dell’utente.")
+        }
         Mutation::Detected(_) => return Err("Scansione di conferma richiesta.".into()),
         Mutation::Brew { cask, name } => {
             let brew = super::installed(super::BREW).ok_or("Homebrew non disponibile.")?;
@@ -198,6 +224,32 @@ mod tests {
         assert!(periodic_status(false, false).contains("non include"));
         assert!(periodic_status(true, true).contains("include il comando"));
         assert!(periodic_status(true, false).contains("incompleta"));
+    }
+    #[test]
+    fn maintenance_uses_fixed_commands_and_refuses_empty_snapshot_inventory() {
+        for (action, expected) in [
+            (Mutation::PurgeBuffers, "/usr/sbin/purge"),
+            (
+                Mutation::ResetUserPermissions,
+                "/usr/sbin/diskutil resetUserPermissions /",
+            ),
+        ] {
+            apply(action, |exe, args, _| {
+                assert_eq!(exe, "/usr/bin/osascript");
+                assert!(
+                    args[1].contains(expected)
+                        && args[1].ends_with("with administrator privileges")
+                );
+                Ok(output(0, ""))
+            })
+            .unwrap();
+        }
+        assert!(apply(Mutation::ThinSnapshots, |exe, args, _| {
+            assert_eq!(exe, "/usr/bin/tmutil");
+            assert_eq!(args, ["listlocalsnapshots", "/"]);
+            Ok(output(0, ""))
+        })
+        .is_err());
     }
     #[test]
     fn rejects_stale_or_untrusted_snapshot_inputs_before_elevation() {

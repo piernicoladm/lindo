@@ -39,10 +39,25 @@ function run(argv) {
     const box = boxes[0], account = box.account();
     if (!account || !account.id()) throw Error("Seleziona una casella di un singolo account.");
     const accountID = String(account.id()), boxName = String(box.name());
-    if (argv[0] === "scan") {
+    function request() {
+        ObjC.import("Foundation");
+        const raw = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+        return JSON.parse(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(raw,$.NSUTF8StringEncoding)));
+    }
+    function sameBox(input) {
+        if (input.accountID !== accountID || input.boxName !== boxName) throw Error("La casella selezionata è cambiata.");
+    }
+    if (argv[0] === "scan" || argv[0] === "page") {
         const total = box.messages.length, rows = [];
+        let offset=0;
+        if (argv[0] === "page") {
+            const page=request(); sameBox(page);
+            if (!Number.isSafeInteger(page.offset) || page.offset < 0 || page.offset % 100 !== 0) throw Error("Pagina non valida.");
+            offset=Math.min(page.offset, Math.floor(Math.max(total-1,0)/100)*100);
+        }
+        const end=Math.min(total,offset+100);
         let skipped = 0;
-        for (let i=0; i<Math.min(total,100); ++i) {
+        for (let i=offset; i<end; ++i) {
             try {
                 const m = box.messages[i], subject = String(m.subject() || "");
                 const promotion = /newsletter|promotion|promozion|offert[ae]|sconto|special offer|sale ends/i.test(subject);
@@ -60,13 +75,10 @@ function run(argv) {
                 rows.push({id,mid,subject:subject.slice(0,240),local,promotion,unsubscribe});
             } catch(e) { ++skipped; }
         }
-        return JSON.stringify({accountID,boxName,total,skipped,rows});
+        return JSON.stringify({accountID,boxName,total,offset,skipped,rows});
     }
     if (argv[0] !== "move") throw Error("Azione sconosciuta.");
-    ObjC.import("Foundation");
-    const raw = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
-    const input = JSON.parse(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(raw,$.NSUTF8StringEncoding)));
-    if (input.accountID !== accountID || input.boxName !== boxName) throw Error("La casella selezionata è cambiata.");
+    const input=request(); sameBox(input);
     // Resolve the account's configured Trash via Mail's standard aggregated Trash.
     const top = app.trashMailbox(), destinations = [];
     for (const child of top.mailboxes()) {
@@ -84,12 +96,27 @@ function run(argv) {
             throw Error("Un messaggio è cambiato. Ripeti la scansione.");
         targets.push(found[0]);
     }
-    let moved=0;
-    for (const m of targets) {
-        try { app.move(m,{to:destinations[0]}); ++moved; }
-        catch(e) { return JSON.stringify({moved,total:targets.length,error:String(e)}); }
+    let moved=0, verified=0;
+    for (let i=0;i<targets.length;++i) {
+        try {
+            const row=input.rows[i], dest=destinations[0];
+            const selected=app.messageViewers()[0].selectedMailboxes();
+            if (selected.length!==1 || String(selected[0].account().id())!==accountID || String(selected[0].name())!==boxName)
+                throw Error("La casella selezionata è cambiata.");
+            const before=box.messages.whose({id:row.id})();
+            if (before.length!==1 || String(before[0].messageId())!==row.mid)
+                throw Error("Il messaggio è cambiato.");
+            const existing=dest.messages.whose({messageId:row.mid})().length;
+            app.move(before[0],{to:dest}); ++moved;
+            // Mail may assign a new local id in Trash. Verify the original local
+            // id disappeared and the RFC Message-ID count increased in this account.
+            if (box.messages.whose({id:row.id})().some(m=>String(m.messageId())===row.mid) ||
+                String(dest.account().id())!==accountID || dest.messages.whose({messageId:row.mid})().length!==existing+1)
+                throw Error("Mail non ha ancora confermato il trasferimento in questa casella. Controlla il Cestino.");
+            ++verified;
+        } catch(e) {return JSON.stringify({moved,verified,total:targets.length,error:String(e)});}
     }
-    return JSON.stringify({moved,total:targets.length});
+    return JSON.stringify({moved,verified,total:targets.length});
 }
 "#;
 
@@ -152,6 +179,7 @@ struct Mailbox {
     name: String,
     rows: Vec<Message>,
     total: u64,
+    offset: u64,
     skipped: u64,
 }
 fn parse_mail(value: Value) -> Result<Mailbox, String> {
@@ -175,10 +203,19 @@ fn parse_mail(value: Value) -> Result<Mailbox, String> {
             promotion: row["promotion"].as_bool().ok_or_else(invalid)?,
         });
     }
+    let total = integer(&value, "total")?;
+    let offset = integer(&value, "offset")?;
+    if !offset.is_multiple_of(100)
+        || (offset > 0 && offset >= total)
+        || rows.len() as u64 > total.saturating_sub(offset).min(100)
+    {
+        return Err(invalid());
+    }
     Ok(Mailbox {
         account: string(&value, "accountID")?,
         name: string(&value, "boxName")?,
-        total: integer(&value, "total")?,
+        total,
+        offset,
         skipped: integer(&value, "skipped")?,
         rows,
     })
@@ -487,8 +524,9 @@ impl Accounts {
                 let moved = reply["moved"]
                     .as_u64()
                     .ok_or("Esito di Mail sconosciuto.")?;
+                let verified = reply["verified"].as_u64().ok_or("Verifica del Cestino sconosciuta.")?;
                 Ok(Reply::Action(format!(
-                    "{moved} di {} messaggi spostati nel Cestino. {}",
+                    "Mail ha spostato {moved} di {} messaggi. {verified} verificati nel Cestino dell’account. {}",
                     rows.len(),
                     reply["error"].as_str().unwrap_or("")
                 )))
@@ -585,7 +623,7 @@ impl Accounts {
         match self.tab {
             Tab::Attachments => self.attachments(ui, ctx),
             Tab::Mail => {
-                ui.label("Seleziona una casella di un singolo account in Apple Mail. Lindo esamina i primi 100 messaggi nell’ordine di Mail e mostra quelli con allegati scaricati, un oggetto promozionale o un’intestazione di disiscrizione.");
+                ui.label("Seleziona una casella di un singolo account in Apple Mail. Lindo esamina 100 messaggi per pagina nell’ordine corrente di Mail e mostra quelli con allegati scaricati, un oggetto promozionale o un’intestazione di disiscrizione.");
                 if ui.button("Analizza casella selezionata in Mail").clicked() {
                     self.reset();
                     self.work(ctx, false, |stop| {
@@ -595,13 +633,42 @@ impl Accounts {
                 }
                 self.review_button(ui);
                 if let Some(mail) = &self.mail {
-                    ui.label(format!(
-                        "{} · {} messaggi · {} esaminati · {} illeggibili",
-                        mail.name,
-                        mail.total,
-                        mail.total.min(100),
-                        mail.skipped
-                    ));
+                    let pages = mail.total.div_ceil(100).max(1);
+                    let examined = mail.total.saturating_sub(mail.offset).min(100);
+                    ui.label(format!("{} · pagina {} di {pages} · {} messaggi totali · {examined} esaminati · {} illeggibili",
+                        mail.name, mail.offset / 100 + 1, mail.total, mail.skipped));
+                    let mut requested = None;
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(mail.offset >= 100, egui::Button::new("Pagina precedente"))
+                            .clicked()
+                        {
+                            requested = Some(mail.offset - 100);
+                        }
+                        if ui
+                            .add_enabled(
+                                mail.offset.saturating_add(100) < mail.total,
+                                egui::Button::new("Pagina successiva"),
+                            )
+                            .clicked()
+                        {
+                            requested = Some(mail.offset + 100);
+                        }
+                    });
+                    if let Some(offset) = requested {
+                        let payload = serde_json::json!({"accountID":mail.account,"boxName":mail.name,"offset":offset});
+                        self.reset();
+                        self.work(ctx, false, move |stop| {
+                            parse_mail(automation(
+                                MAIL_SCRIPT,
+                                "page",
+                                Some(json_input(&payload)?),
+                                stop,
+                            )?)
+                            .map(Reply::Mail)
+                        });
+                        return;
+                    }
                     let mut change = None;
                     egui::ScrollArea::vertical()
                         .id_salt("mail_results")
@@ -684,7 +751,14 @@ impl Accounts {
                                     ui.horizontal(|ui| {
                                         if direct {
                                             let mut checked = self.selected.contains(&i);
-                                            if ui.checkbox(&mut checked, "").changed() {
+                                            if crate::extras::file_checkbox(
+                                                ui,
+                                                &mut checked,
+                                                true,
+                                                &item.path,
+                                            )
+                                            .changed()
+                                            {
                                                 change = Some((i, checked));
                                             }
                                         }
@@ -722,13 +796,56 @@ impl Accounts {
             }
             Tab::Privacy => {
                 ui.label("Apri i controlli del browser per scegliere cronologia, cookie e intervallo di tempo. Nel browser aperto verifica profilo e sincronizzazione prima di cancellare.");
-                for (title,args) in [
-                    ("Safari · Cronologia > Cancella cronologia",vec!["-b","com.apple.Safari"]),
-                    ("Chrome · Cancella dati di navigazione",vec!["-b","com.google.Chrome","chrome://settings/clearBrowserData"]),
-                    ("Edge · Cancella dati di navigazione",vec!["-b","com.microsoft.edgemac","edge://settings/clearBrowserData"]),
-                    ("Firefox · Privacy e sicurezza",vec!["-b","org.mozilla.firefox","about:preferences#privacy"]),
-                    ("Permessi privacy di macOS",vec!["x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension"]),
-                ]{if ui.button(title).clicked(){self.work(ctx,false,move|stop|open_client(&args,stop));break;}}
+                for (title, args) in [
+                    (
+                        "Safari · Cronologia > Cancella cronologia",
+                        vec!["-b", "com.apple.Safari"],
+                    ),
+                    (
+                        "Chrome · Cancella dati di navigazione",
+                        vec![
+                            "-b",
+                            "com.google.Chrome",
+                            "chrome://settings/clearBrowserData",
+                        ],
+                    ),
+                    (
+                        "Edge · Cancella dati di navigazione",
+                        vec![
+                            "-b",
+                            "com.microsoft.edgemac",
+                            "edge://settings/clearBrowserData",
+                        ],
+                    ),
+                    (
+                        "Firefox · Privacy e sicurezza",
+                        vec!["-b", "org.mozilla.firefox", "about:preferences#privacy"],
+                    ),
+                    (
+                        "Permessi privacy di macOS",
+                        vec![
+                            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+                        ],
+                    ),
+                ] {
+                    if ui.button(title).clicked() {
+                        self.work(ctx, false, move |stop| open_client(&args, stop));
+                        break;
+                    }
+                }
+                ui.horizontal_wrapped(|ui| {
+                    for (title, pane, help) in [
+                        ("Gestisci reti Wi-Fi conosciute", "x-apple.systempreferences:com.apple.wifi-settings-extension", "In Wi-Fi scegli Avanzate. Accanto alla rete apri il menu Altro e scegli Rimuovi dall’elenco."),
+                        ("Gestisci elementi recenti", "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension", "In Barra dei menu scegli il numero di documenti, applicazioni e server recenti. Per svuotare l’elenco scegli menu Apple > Elementi recenti > Cancella menu."),
+                    ] {
+                        if ui.button(title).on_hover_text(help).clicked() {
+                            self.work(ctx, false, move |stop| {
+                                open_client(&[pane], stop)?;
+                                Ok(Reply::Action(help.into()))
+                            });
+                        }
+                    }
+                });
                 self.browser_tabs(ui, ctx);
             }
         }
@@ -806,12 +923,14 @@ function fixtureApp() {
     const message={id:()=>3,messageId:()=>"fixture-id",subject:()=>"Offerta fixture",
         mailAttachments:()=>[{downloaded:()=>true},{downloaded:()=>false}],
         headers:{whose:()=>()=>[{content:()=>"<https://fixture.invalid/u>"}]}};
-    const messages=[message]; messages.whose=({id})=>()=>messages.filter(m=>m.id()===id);
+    const messages=[message], trash=[];
+    messages.whose=({id})=>()=>messages.filter(m=>m.id()===id);
+    trash.whose=({messageId})=>()=>trash.filter(m=>m.messageId()===messageId);
     const source={name:()=>"Fixture",account:()=>account,messages};
-    const dest={name:()=>"Trash",account:()=>account};
+    const dest={name:()=>"Trash",account:()=>account,messages:trash};
     return {messageViewers:()=>[{selectedMailboxes:()=>[source]}],
         trashMailbox:()=>({mailboxes:()=>[dest]}),
-        move:(m,{to})=>{if(m!==message || to!==dest) throw Error("Wrong target");}};
+        move:(m,{to})=>{if(m!==message || to!==dest) throw Error("Wrong target"); messages.splice(messages.indexOf(m),1); trash.push(m);}};
 }
 "#;
     #[test]
@@ -837,6 +956,7 @@ function fixtureApp() {
         )
         .unwrap();
         assert_eq!(good["moved"], 1);
+        assert_eq!(good["verified"], 1);
         assert!(automation(
             &script,
             "move",
@@ -844,6 +964,53 @@ function fixtureApp() {
             &stop
         )
         .is_err());
+    }
+
+    #[test]
+    fn mail_pagination_scans_later_pages_and_rejects_mailbox_changes() {
+        let fixture = r#"
+function fixtureApp(){
+ const account={id:()=>"fixture"};
+ const messages=Array.from({length:220},(_,i)=>({
+    id:()=>i+1, messageId:()=>"fixture-"+(i+1), subject:()=>[144,219].includes(i)?"Newsletter":"Ordinary message",
+    mailAttachments:()=>[], headers:{whose:()=>()=>[]}
+ }));
+ const box={name:()=>"Fixture",account:()=>account,messages};
+ return {messageViewers:()=>[{selectedMailboxes:()=>[box]}]};
+}"#;
+        let script = format!(
+            "{fixture}\n{}",
+            MAIL_SCRIPT.replace("Application(\"com.apple.mail\")", "fixtureApp()")
+        );
+        let stop = AtomicBool::new(false);
+        let first = parse_mail(automation(&script, "scan", None, &stop).unwrap()).unwrap();
+        assert_eq!((first.total, first.offset, first.rows.len()), (220, 0, 0));
+        let page = |offset, box_name| {
+            let payload = json!({"accountID":"fixture","boxName":box_name,"offset":offset});
+            parse_mail(automation(
+                &script,
+                "page",
+                Some(json_input(&payload)?),
+                &stop,
+            )?)
+        };
+        let second = page(100, "Fixture").unwrap();
+        assert_eq!(second.rows[0].id, 145);
+        let third = page(200, "Fixture").unwrap();
+        assert_eq!(third.offset, 200);
+        assert_eq!(third.rows[0].id, 220);
+        assert_eq!(page(100, "Fixture").unwrap().rows[0].id, 145);
+        assert_eq!(page(300, "Fixture").unwrap().offset, 200);
+        assert!(page(101, "Fixture").is_err());
+        assert!(page(100, "Other").is_err());
+        let mut panel = Accounts {
+            mail: Some(second),
+            selected: HashSet::from([0]),
+            review: Some(vec![0]),
+            ..Default::default()
+        };
+        panel.reset();
+        assert!(panel.selected.is_empty() && panel.review.is_none() && panel.mail.is_none());
     }
 
     const CHROME_FIXTURE: &str = r#"

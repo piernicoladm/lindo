@@ -545,7 +545,7 @@ fn browser_path(id: &str, path: &Path) -> bool {
     exec == names[0] || exec.starts_with(&format!("{} Helper", names[0]))
 }
 
-fn check_running(path: &Path, id: &str, cache: bool) -> Result<(), String> {
+pub(crate) fn check_running(path: &Path, id: &str, cache: bool) -> Result<(), String> {
     let blocked = |p: &Path| p.starts_with(path) || (cache && browser_path(id, p));
     let mut in_use = objc2::rc::autoreleasepool(|_| {
         let running = NSWorkspace::sharedWorkspace().runningApplications();

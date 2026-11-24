@@ -549,6 +549,17 @@ impl Scan<'_> {
     }
 }
 
+/// A scan launched from the window yields CPU and I/O priority to interaction.
+pub(crate) fn set_worker_qos() {
+    unsafe extern "C" {
+        fn pthread_set_qos_class_self_np(class: u32, relative_priority: i32) -> i32;
+    }
+    // QOS_CLASS_UTILITY from Darwin sys/qos.h; failure retains the OS default.
+    unsafe {
+        pthread_set_qos_class_self_np(0x11, 0);
+    }
+}
+
 pub fn run(req: &Request, stop: &AtomicBool, progress: &Progress) -> Report {
     if req.mode == Mode::Junk {
         return Report {

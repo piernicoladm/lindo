@@ -41,6 +41,10 @@ fn hint(mode: Mode) -> &'static str {
     }
 }
 
+fn item_count(n: usize) -> String {
+    format!("{n} {}", if n == 1 { "elemento" } else { "elementi" })
+}
+
 pub(crate) fn size(bytes: u64) -> String {
     for (unit, divisor) in [
         ("TB", 1_000_000_000_000u64),
@@ -218,6 +222,23 @@ struct Page {
 }
 
 impl Page {
+    fn choose_root(&mut self, path: PathBuf, append: bool) {
+        if append {
+            if self.req.roots.iter().any(|root| path.starts_with(root)) {
+                return;
+            }
+            self.req.roots.retain(|root| !root.starts_with(&path));
+            self.req.roots.push(path);
+        } else {
+            if self.req.roots == [path.clone()] {
+                return;
+            }
+            self.req.roots = vec![path];
+        }
+        self.history.clear();
+        self.invalidate();
+    }
+
     fn new(mode: Mode) -> Self {
         Self {
             req: initial_request(mode),
@@ -469,18 +490,27 @@ enum Extra {
     Accounts,
     Remote,
     Updates,
+    Reset,
+    Versions,
+    Legacy,
 }
-const EXTRAS: [(Extra, &str); 6] = [
+const EXTRAS: [(Extra, &str); 9] = [
     (Extra::Clutter, "Download e immagini"),
     (Extra::Junk, "Pulizia avanzata"),
     (Extra::System, "Strumenti di sistema"),
     (Extra::Accounts, "Mail e browser"),
     (Extra::Remote, "Archivi cloud"),
     (Extra::Updates, "Aggiornamenti app"),
+    (Extra::Reset, "Ripristino app"),
+    (Extra::Versions, "Revisioni documento"),
+    (Extra::Legacy, "Preferenze e avvii obsoleti"),
 ];
 
 struct Lindo {
     extra: Option<Extra>,
+    reset: crate::app_reset::AppReset,
+    versions: crate::file_versions::FileVersions,
+    legacy: crate::legacy_junk::LegacyJunk,
     vendor: crate::vendor_updates::VendorUpdates,
     remote: crate::remote::Remote,
     accounts: crate::accounts::Accounts,
@@ -500,6 +530,7 @@ struct Lindo {
     workers: usize,
     next_id: u64,
     picker: crate::picker::Picker,
+    append_root: bool,
     review: Option<Review>,
     confirm: bool,
     cleaning: bool,
@@ -558,6 +589,9 @@ impl Lindo {
             pages: MODES.into_iter().map(|m| (m, Page::new(m))).collect(),
             tool_query: String::new(),
             favorites: Self::favorite_tools(),
+            reset: Default::default(),
+            versions: Default::default(),
+            legacy: Default::default(),
             vendor: Default::default(),
             remote: Default::default(),
             accounts: Default::default(),
@@ -575,6 +609,7 @@ impl Lindo {
             workers: 0,
             next_id: 0,
             picker: crate::picker::Picker::new(),
+            append_root: false,
             review: None,
             confirm: false,
             cleaning: false,
@@ -682,6 +717,7 @@ impl Lindo {
         let sender = self.tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
+            crate::scan::set_worker_qos();
             let report = crate::scan::run(&req, &stop, &progress);
             let result = if stop.load(Ordering::Acquire) {
                 // Discard the interrupted scan on this worker before indexing any rows.
@@ -863,6 +899,9 @@ impl Lindo {
             .chain(EXTRAS.iter().map(|&(extra, label)| {
                 let detail = match extra {
                     Extra::Clutter => "File vecchi, archivi, installatori e immagini simili",
+                    Extra::Legacy => {
+                        "Preferenze danneggiate, agenti di avvio non più presenti e account rimossi"
+                    }
                     Extra::Junk => "Cache di sviluppo e AI, disinstallazione, backup iOS e residui",
                     Extra::System => {
                         "Volumi, snapshot, aggiornamenti, malware, manutenzione, login e Cestino"
@@ -870,6 +909,10 @@ impl Lindo {
                     Extra::Accounts => {
                         "Allegati Mail, newsletter, schede Chrome, privacy e copie locali iCloud"
                     }
+                    Extra::Reset => {
+                        "Preferenze delle app, backup recuperabili, lingue e architetture"
+                    }
+                    Extra::Versions => "Revisioni storiche dei documenti salvate da macOS",
                     Extra::Updates => {
                         "Versioni delle app e aggiornamenti degli editori con Sparkle"
                     }
@@ -929,13 +972,24 @@ impl Lindo {
     }
 
     fn section(&mut self, ui: &mut egui::Ui, mode: Mode, ctx: &egui::Context) {
-        ui.heading(title(mode));
+        ui.horizontal_wrapped(|ui| {
+            ui.heading(title(mode));
+            if mode == Mode::Apps && ui.button("Ripristino app…").clicked() {
+                self.extra = Some(Extra::Reset);
+                self.mode = None;
+            }
+            if mode == Mode::Space && ui.button("Revisioni documento…").clicked() {
+                self.extra = Some(Extra::Versions);
+                self.mode = None;
+            }
+        });
         ui.label(hint(mode));
         ui.add_space(8.0);
         let available = self.available();
         let page = self.pages.get_mut(&mode).unwrap();
         let mut scan = false;
         let mut choose = false;
+        let mut append = false;
         ui.add_enabled_ui(available, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if mode == Mode::Space {
@@ -971,6 +1025,10 @@ impl Lindo {
                 }
                 if matches!(mode, Mode::Space | Mode::Large | Mode::Duplicates) {
                     choose = ui.button("Scegli cartella…").clicked();
+                    if matches!(mode, Mode::Large | Mode::Duplicates) && !page.req.roots.is_empty()
+                    {
+                        append = ui.button("Aggiungi cartella…").clicked();
+                    }
                 }
                 if matches!(mode, Mode::Large | Mode::Duplicates) {
                     let options: &[u64] = if mode == Mode::Large {
@@ -1003,11 +1061,33 @@ impl Lindo {
         if page.req.roots.is_empty() {
             ui.small("Scegli una cartella per iniziare.");
         }
-        for p in &page.req.roots {
-            ui.small(p.to_string_lossy());
+        let mut remove = None;
+        egui::ScrollArea::vertical()
+            .id_salt(("radici", mode))
+            .max_height(84.)
+            .show(ui, |ui| {
+                for (index, p) in page.req.roots.iter().enumerate() {
+                    ui.horizontal_wrapped(|ui| {
+                        if matches!(mode, Mode::Duplicates | Mode::Large)
+                            && page.req.roots.len() > 1
+                            && ui
+                                .add_enabled(available, egui::Button::new("Rimuovi").small())
+                                .on_hover_text("Rimuovi questa cartella dall’analisi")
+                                .clicked()
+                        {
+                            remove = Some(index);
+                        }
+                        ui.small(p.to_string_lossy());
+                    });
+                }
+            });
+        if let Some(index) = remove {
+            page.req.roots.remove(index);
+            page.invalidate();
         }
         ui.separator();
-        if choose {
+        if choose || append {
+            self.append_root = append;
             self.picker.open(mode, ctx);
             return;
         }
@@ -1026,7 +1106,7 @@ impl Lindo {
         };
         let r = &results.report;
         ui.horizontal_wrapped(|ui| {
-            ui.strong(format!("{} elementi", r.items.len()));
+            ui.strong(item_count(r.items.len()));
             ui.label(format!("{} visitati · {} esclusi", r.visited, r.skipped));
             if mode == Mode::Duplicates {
                 ui.label(format!("{} gruppi", results.groups.len()));
@@ -1182,11 +1262,7 @@ impl Lindo {
                             if mode != Mode::Space {
                                 let protected = item.group.and_then(|g| page.keeper(g)) == Some(i);
                                 let mut chosen = page.selected.contains(&i);
-                                if ui
-                                    .add_enabled(
-                                        !protected,
-                                        egui::Checkbox::without_text(&mut chosen),
-                                    )
+                                if crate::extras::file_checkbox(ui, &mut chosen, !protected, &item.path)
                                     .on_hover_text("Seleziona per il Cestino")
                                     .changed()
                                 {
@@ -1286,9 +1362,9 @@ impl Lindo {
         let review = self.review.as_ref().unwrap();
         ui.heading("Rivedi la selezione");
         ui.label(format!(
-            "{} · {} elementi · {}",
+            "{} · {} · {}",
             review.label,
-            review.moves.len(),
+            item_count(review.moves.len()),
             size(review.total)
         ));
         if review.cloud {
@@ -1300,8 +1376,8 @@ impl Lindo {
         ui.horizontal_wrapped(|ui| {
             if self.confirm {
                 ui.strong(format!(
-                    "Confermi lo spostamento di {} elementi?",
-                    review.moves.len()
+                    "Confermi lo spostamento di {}?",
+                    item_count(review.moves.len())
                 ));
                 if ui.button("Annulla conferma").clicked() {
                     self.confirm = false;
@@ -1362,29 +1438,50 @@ impl Lindo {
 
 #[derive(Default)]
 struct Fixture {
-    started: bool,
+    launched: Option<std::time::Instant>,
+    window_start: Option<std::time::Instant>,
     frames: usize,
+    warmup_frames: usize,
     last_frame: Option<std::time::Instant>,
-    longest_gap: Duration,
+    previous_phase: usize,
+    gap: [Duration; 3],
+    work: [Duration; 3],
     first_frame: Option<std::time::Instant>,
     last_sample: Option<std::time::Instant>,
     result_frames: usize,
 }
 
 impl Lindo {
-    fn fixture_frame(&mut self, ctx: &egui::Context) {
-        let Some(fixture) = self.fixture.as_mut() else {
-            return;
-        };
+    fn fixture_frame(&mut self, ctx: &egui::Context, entered: std::time::Instant) {
+        let fixture = self.fixture.as_mut().expect("active UI probe");
+        let mode = self.mode.unwrap();
+        let result = self.pages[&mode].result.as_ref();
         let now = std::time::Instant::now();
-        let start = *fixture.first_frame.get_or_insert(now);
+        let first = *fixture.first_frame.get_or_insert(entered);
+        let phase = if fixture.launched.is_none() {
+            0
+        } else if result.is_none() {
+            1
+        } else {
+            2
+        };
+        fixture.work[phase] = fixture.work[phase].max(now.duration_since(entered));
+        if ctx.will_discard() {
+            return;
+        }
+
+        if let Some(prev) = fixture.last_frame.replace(entered) {
+            let previous = fixture.previous_phase;
+            fixture.gap[previous] = fixture.gap[previous].max(entered.duration_since(prev));
+        }
+        fixture.previous_phase = phase;
         fixture.frames += 1;
         let last_sample = fixture.last_sample.get_or_insert(now);
         if now.duration_since(*last_sample) >= Duration::from_secs(10) {
             if let Some(active) = &self.active {
                 println!(
                     "LINDO_UI_PROGRESS seconds={} visited={} hashed={} compared={}",
-                    start.elapsed().as_secs(),
+                    first.elapsed().as_secs(),
                     active.progress.visited.load(Ordering::Relaxed),
                     active.progress.hashed_bytes.load(Ordering::Relaxed),
                     active.progress.compared_bytes.load(Ordering::Relaxed)
@@ -1392,29 +1489,69 @@ impl Lindo {
             }
             *last_sample = now;
         }
-        if let Some(prev) = fixture.last_frame.replace(now) {
-            fixture.longest_gap = fixture.longest_gap.max(now.duration_since(prev));
-        }
-        if !fixture.started {
-            fixture.started = true;
-            self.launch_scan(self.mode.unwrap(), ctx);
-        } else if let Some(r) = &self.pages[&self.mode.unwrap()].result {
-            fixture.result_frames += 1;
-            if fixture.result_frames >= 4 {
-                let ok = !r.report.cancelled && r.report.errors == 0 && !r.report.items.is_empty();
-                println!("LINDO_UI_QA version={} mode={:?} ok={} frames={} elapsed_ms={} longest_gap_ms={} result_frames={} items={} groups={} visited={} errors={} cancelled={}", env!("CARGO_PKG_VERSION"),self.mode.unwrap(),ok,fixture.frames,start.elapsed().as_millis(),fixture.longest_gap.as_millis(),fixture.result_frames,r.report.items.len(),r.groups.len(),r.report.visited,r.report.errors,r.report.cancelled);
-                self.fixture = None;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        if let Some(start) = fixture.launched {
+            if let Some(r) = result {
+                fixture.result_frames += 1;
+                if fixture.result_frames >= 4 {
+                    let ok =
+                        !r.report.cancelled && r.report.errors == 0 && !r.report.items.is_empty();
+                    let g = fixture.gap.map(|v| v.as_millis());
+                    let w = fixture.work.map(|v| v.as_millis());
+                    println!(
+                        concat!(
+                            "LINDO_UI_QA version={} mode={:?} ok={} frames={} elapsed_ms={} longest_gap_ms={} ",
+                            "opening_ms={} first_frame_ms={} warmup_frames={} opening_gap_ms={} scanning_gap_ms={} results_gap_ms={} ",
+                            "opening_work_ms={} scanning_work_ms={} results_work_ms={} result_frames={} items={} groups={} visited={} errors={} cancelled={}"
+                        ),
+                        env!("CARGO_PKG_VERSION"),
+                        mode,
+                        ok,
+                        fixture.frames,
+                        start.elapsed().as_millis(),
+                        g[1].max(g[2]),
+                        start.duration_since(first).as_millis(),
+                        fixture
+                            .window_start
+                            .map_or(0, |opening| first.duration_since(opening).as_millis()),
+                        fixture.warmup_frames,
+                        g[0],
+                        g[1],
+                        g[2],
+                        w[0],
+                        w[1],
+                        w[2],
+                        fixture.result_frames,
+                        r.report.items.len(),
+                        r.groups.len(),
+                        r.report.visited,
+                        r.report.errors,
+                        r.report.cancelled
+                    );
+                    self.fixture = None;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        } else {
+            fixture.warmup_frames += 1;
+            // Exercise the same scan action a user invokes from a painted window.
+            // Keep the cold-window timings visible separately from scan timings.
+            if fixture.warmup_frames >= 8 && now.duration_since(first) >= Duration::from_millis(300)
+            {
+                fixture.launched = Some(now);
+                fixture.last_frame = Some(now);
+                fixture.previous_phase = 1;
+                self.launch_scan(mode, ctx);
+                let fixture = self.fixture.as_mut().expect("active UI probe");
+                fixture.work[1] = fixture.work[1].max(now.elapsed());
             }
         }
-        // egui subtracts its predicted frame time from this interval. A 16 ms
-        // interval can therefore become zero and make the QA probe busy-loop.
         ctx.request_repaint_after(Duration::from_millis(40));
     }
 }
 
 impl eframe::App for Lindo {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let probe_frame = self.fixture.as_ref().map(|_| std::time::Instant::now());
         if self.desktop.cover(ctx) {
             return;
         }
@@ -1428,6 +1565,7 @@ impl eframe::App for Lindo {
             });
         }
         self.receive();
+        self.system.monitor_alert(ctx);
         self.desktop.refresh(ctx, self.disk);
         self.picker.poll();
         if self.review.is_none() && self.available() {
@@ -1435,7 +1573,6 @@ impl eframe::App for Lindo {
                 self.launch_scan(mode, ctx);
             }
         }
-        self.fixture_frame(ctx);
         let browsing = self.review.is_none() && !self.picker.visible() && !self.cleaning;
         let sections = [
             ("Panoramica", None),
@@ -1487,6 +1624,9 @@ impl eframe::App for Lindo {
                     }
                     ui.separator();
                     for (extra, label) in EXTRAS {
+                        if matches!(extra, Extra::Reset | Extra::Versions | Extra::Legacy) {
+                            continue;
+                        }
                         if ui
                             .selectable_label(self.extra == Some(extra), label)
                             .clicked()
@@ -1580,16 +1720,29 @@ impl eframe::App for Lindo {
             if self.picker.visible() {
                 if let Some((mode, path)) = self.picker.draw(ui, ctx) {
                     let page = self.pages.get_mut(&mode).unwrap();
-                    if page.req.roots != [path.clone()] {
-                        page.invalidate();
-                        page.history.clear();
-                        page.req.roots = vec![path];
-                    }
+                    page.choose_root(path, self.append_root);
+                    self.append_root = false;
                 }
             } else if self.review.is_some() {
                 self.review_page(ui, ctx);
             } else if let Some(extra) = self.extra {
                 let proposal = match extra {
+                    Extra::Reset => {
+                        if ui.small_button("‹ Applicazioni").clicked() {
+                            self.extra = None;
+                            self.mode = Some(Mode::Apps);
+                        }
+                        self.reset.show(ui, ctx);
+                        None
+                    }
+                    Extra::Versions => {
+                        if ui.small_button("‹ Mappa dello spazio").clicked() {
+                            self.extra = None;
+                            self.mode = Some(Mode::Space);
+                        }
+                        self.versions.show(ui, ctx);
+                        None
+                    }
                     Extra::Updates => {
                         self.vendor.show(ui, ctx);
                         None
@@ -1603,7 +1756,19 @@ impl eframe::App for Lindo {
                         None
                     }
                     Extra::Clutter => self.clutter.show(ui, ctx),
-                    Extra::Junk => self.junk.show(ui, ctx),
+                    Extra::Junk => {
+                        if ui.small_button("Preferenze e avvii obsoleti…").clicked() {
+                            self.extra = Some(Extra::Legacy);
+                        }
+                        self.junk.show(ui, ctx)
+                    }
+                    Extra::Legacy => {
+                        if ui.small_button("‹ Pulizia avanzata").clicked() {
+                            self.extra = Some(Extra::Junk);
+                        }
+                        self.legacy.show(ui, ctx);
+                        None
+                    }
                     Extra::System => {
                         self.system.show(ui, ctx);
                         None
@@ -1626,6 +1791,9 @@ impl eframe::App for Lindo {
                 egui::ScrollArea::vertical().show(ui, |ui| self.overview(ui, ctx));
             }
         });
+        if let Some(entered) = probe_frame {
+            self.fixture_frame(ctx, entered);
+        }
     }
 }
 
@@ -1638,6 +1806,7 @@ impl Drop for Lindo {
 }
 
 fn run_window(fixture: Option<(PathBuf, Mode)>) -> eframe::Result {
+    let window_start = fixture.as_ref().map(|_| std::time::Instant::now());
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([920.0, 640.0])
@@ -1656,7 +1825,10 @@ fn run_window(fixture: Option<(PathBuf, Mode)>) -> eframe::Result {
                     req.min_bytes = 1;
                 }
                 app.mode = Some(mode);
-                app.fixture = Some(Fixture::default());
+                app.fixture = Some(Fixture {
+                    window_start,
+                    ..Default::default()
+                });
             }
             Ok(Box::new(app))
         }),
@@ -1692,6 +1864,17 @@ mod tests {
             });
         }
         Arc::new(Results::prepare(Mode::Duplicates, report))
+    }
+
+    #[test]
+    fn choosing_multiple_roots_eliminates_overlaps_and_keeps_unrelated_scopes() {
+        let mut page = Page::new(Mode::Duplicates);
+        for path in ["/a/one", "/b", "/a", "/a/deeper"] {
+            page.choose_root(path.into(), true);
+        }
+        assert_eq!(page.req.roots, [PathBuf::from("/b"), PathBuf::from("/a")]);
+        page.choose_root("/c".into(), false);
+        assert_eq!(page.req.roots, [PathBuf::from("/c")]);
     }
 
     #[test]

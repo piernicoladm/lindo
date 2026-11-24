@@ -1,8 +1,11 @@
 mod accounts;
+mod app_reset;
 mod clutter;
 mod desktop;
 mod extras;
+mod file_versions;
 mod junk;
+mod legacy_junk;
 mod model;
 mod picker;
 mod policy;

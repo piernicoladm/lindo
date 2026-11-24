@@ -665,7 +665,7 @@ impl Junk {
             for row in &mut self.result.rows[range] {
                 ui.horizontal(|ui| {
                     if row.item.is_some() {
-                        ui.checkbox(&mut row.selected, "");
+                        crate::extras::file_checkbox(ui, &mut row.selected, true, &row.path);
                     }
                     ui.strong(row.path.file_name().unwrap_or_default().to_string_lossy());
                     if let Some(size) = row.bytes {

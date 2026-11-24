@@ -44,7 +44,9 @@ fn kind(path: &Path) -> &'static str {
     match ext.as_str() {
         "dmg" | "pkg" | "mpkg" | "iso" => "Installatori",
         "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "rar" | "7z" | "zst" => "Archivi",
-        "jpg" | "jpeg" | "png" | "gif" | "heic" | "tif" | "tiff" | "webp" | "svg" => "Immagini",
+        "jpg" | "jpeg" | "png" | "gif" | "heic" | "heif" | "tif" | "tiff" | "webp" | "svg" => {
+            "Immagini"
+        }
         "mov" | "mp4" | "mkv" | "avi" | "m4v" => "Video",
         "wav" | "mp3" | "aiff" | "flac" | "m4a" => "Audio",
         "pdf" | "doc" | "docx" | "txt" | "rtf" | "xlsx" | "csv" | "pptx" => "Documenti",
@@ -389,7 +391,7 @@ impl Clutter {
                 ui.label("Tipi di file riconosciuti dall’estensione, ordinati per dimensione.");
             }
             Tool::Similar => {
-                ui.label("JPEG e PNG locali · fino a 2.000 file in ordine di percorso · 32 MiB, 16 megapixel e 8.192 px per lato. Confronto di forme e colori dopo la correzione dell’orientamento. Ogni gruppo conserva l’immagine di riferimento con più pixel.");
+                ui.label("JPEG, PNG, HEIC e HEIF locali · fino a 2.000 file in ordine di percorso · 32 MiB, 16 megapixel e 8.192 px per lato. Confronto di forme e colori dopo la correzione dell’orientamento. Ogni gruppo conserva l’immagine di riferimento con più pixel.");
             }
         }
         let job_result = self.job.as_ref().map(|job| job.rx.try_recv());
@@ -482,7 +484,14 @@ impl Clutter {
                                 ui.label("Conservata");
                             } else {
                                 let mut checked = self.selected.contains(&index);
-                                if ui.checkbox(&mut checked, "").changed() {
+                                if crate::extras::file_checkbox(
+                                    ui,
+                                    &mut checked,
+                                    true,
+                                    &row.item.path,
+                                )
+                                .changed()
+                                {
                                     if checked {
                                         self.selected.insert(index);
                                     } else {

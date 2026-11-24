@@ -5,6 +5,8 @@ mod maintenance;
 use maintenance::Mutation;
 
 use crate::{model::Mode, policy};
+#[path = "system_monitor.rs"]
+mod folder_monitor;
 #[path = "system_scan.rs"]
 mod security_scan;
 #[path = "system_signatures.rs"]
@@ -320,11 +322,15 @@ pub(crate) struct SystemTools {
     section: Section,
     file: String,
     pending: Option<Mutation>,
+    monitor: folder_monitor::Monitor,
     job: Option<Job>,
     report: Option<Report>,
     message: String,
 }
 impl SystemTools {
+    pub(crate) fn monitor_alert(&mut self, ctx: &egui::Context) {
+        self.monitor.alert(ctx);
+    }
     fn button(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, label: &str, action: Action) {
         if !ui
             .add_enabled(self.job.is_none(), egui::Button::new(label))
@@ -430,6 +436,7 @@ impl SystemTools {
                         self.open(ui,ctx,"Gestisci spazio macOS","x-apple.systempreferences:com.apple.settings.Storage");
                         self.open(ui,ctx,"Configura Time Machine","x-apple.systempreferences:com.apple.Time-Machine-Settings.extension");
                         self.propose(ui,Mutation::EmptyTrash);
+                        self.propose(ui,Mutation::ThinSnapshots);
                     });
                     ui.strong("Verifica del filesystem");
                     ui.label("Controlla il volume di avvio con diskutil. Il controllo può rallentare il Mac per alcuni minuti. Per riparare un volume, apri Utility Disco e scegli S.O.S.");
@@ -446,6 +453,8 @@ impl SystemTools {
                         self.button(ui,ctx,"Controlla strumenti periodici",Action::PeriodicStatus);
                         self.propose(ui,Mutation::FlushDns);
                         self.propose(ui,Mutation::Spotlight);
+                        self.propose(ui,Mutation::PurgeBuffers);
+                        self.propose(ui,Mutation::ResetUserPermissions);
                     });
                     ui.add_space(8.0);
                     ui.strong("Memoria delle app");
@@ -489,7 +498,8 @@ impl SystemTools {
                     ui.add_enabled_ui(!self.file.is_empty(), |ui| {
                         self.button(ui,ctx,"Avvia scansione",Action::Scan(self.file.as_str().into()));
                     });
-                    let findings=self.report.as_ref().map(|r|r.findings.clone()).unwrap_or_default();
+                    let mut findings=self.report.as_ref().map(|r|r.findings.clone()).unwrap_or_default();
+                    findings.extend(self.monitor.show(ui,ctx,&self.file));
                     for finding in findings {
                         ui.label(finding.path.display().to_string());
                         ui.horizontal_wrapped(|ui| {

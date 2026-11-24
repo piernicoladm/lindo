@@ -14,7 +14,9 @@ def run(binary, mode, root, entries, groups, rows, timeout):
     fields = dict(token.split("=", 1) for token in line.split() if "=" in token)
     if (fields.get("ok") != "true" or int(fields["visited"]) < entries
             or int(fields["groups"]) != groups or int(fields["items"]) != rows
-            or int(fields["result_frames"]) < 4 or int(fields["longest_gap_ms"]) > 1000):
+            or int(fields["warmup_frames"]) < 8 or int(fields["opening_ms"]) < 300
+            or int(fields["result_frames"]) < 4 or int(fields["longest_gap_ms"]) > 1000
+            or max(int(fields[key]) for key in ("scanning_work_ms", "results_work_ms")) > 1000):
         raise SystemExit("Unexpected result count or native window stalled for more than one second")
 
 

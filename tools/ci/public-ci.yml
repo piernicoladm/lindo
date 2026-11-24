@@ -2,6 +2,8 @@ name: Build and synthetic safety checks
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -42,15 +44,22 @@ jobs:
           rustc --version
           cargo --version
           mkdir -p "$RUNNER_TEMP/lindo-evidence"
+      - name: Check Rust formatting and lints
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="$HOME/Library/Developer/Lindo/rust-target"
+          cargo fmt --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Verify source export boundaries
         run: |
           set -euo pipefail
           python3 tools/test-export.py 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/export-tests.log"
           python3 tools/export-source.py --output "$RUNNER_TEMP/Lindo-source" --zip "$RUNNER_TEMP/Lindo-source.zip" | tee "$RUNNER_TEMP/lindo-evidence/export.json"
+          cmp SOURCE-MANIFEST.json "$RUNNER_TEMP/Lindo-source/SOURCE-MANIFEST.json"
       - name: Test engine and app with synthetic data
         run: |
           set -euo pipefail
-          tools/selftest.sh 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/selftest.log"
+          tools/selftest.sh --all-features 2>&1 | tee "$RUNNER_TEMP/lindo-evidence/selftest.log"
       - name: Exercise the native window on synthetic filesystem fixtures
         run: |
           set -euo pipefail
