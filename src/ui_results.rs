@@ -444,8 +444,18 @@ impl Lindo {
                 for row in range {
                     let i = page.row_id(row);
                     let item = &r.items[i];
-                    ui.push_id(i, |ui| {
+                    let directory = mode == Mode::Space && item.identity.is_dir();
+                    let sense = if directory && available {
+                        egui::Sense::click() - egui::Sense::FOCUSABLE
+                    } else { egui::Sense::hover() };
+                    let row = ui.scope_builder(egui::UiBuilder::new().id_salt(i).sense(sense), |ui| {
                         ui.set_min_height(48.0);
+                        if directory {
+                            ui.set_min_width(ui.available_width());
+                            // Directory details belong to the row hit target. The name
+                            // button remains its keyboard action, and Finder is separate.
+                            ui.style_mut().interaction.selectable_labels = false;
+                        }
                         compact_row(ui);
                         ui.horizontal(|ui| {
                             if mode != Mode::Space {
@@ -483,6 +493,8 @@ impl Lindo {
                                 {
                                     drill = Some(item.path.clone());
                                 }
+                            } else if mode == Mode::Space {
+                                space_file_name(ui, width, name.as_ref(), &item.path, &mut reveal);
                             } else {
                                 ui.add_sized(
                                     [width, 18.0],
@@ -532,6 +544,10 @@ impl Lindo {
                             .on_hover_text(item.path.to_string_lossy());
                         });
                     });
+                    if directory && available && row.response.on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(format!("Apri {}",item.path.display())).clicked() {
+                        drill=Some(item.path.clone());
+                    }
                 }
             });
         if let Some(p) = drill {
@@ -825,10 +841,7 @@ fn duplicate_group(
                                             format!("Conserva {}", item.path.display()),
                                         )
                                     });
-                                    if radio.clicked() {
-                                        page.keepers.insert(group, i);
-                                        page.select(i, false);
-                                    }
+                                    let mut choose_keeper = radio.clicked();
                                     let width = (ui.available_width()
                                         - if compact { 4. } else { 235. })
                                     .max(40.);
@@ -841,13 +854,24 @@ fn duplicate_group(
                                                 .file_name()
                                                 .unwrap_or(item.path.as_os_str())
                                                 .to_string_lossy();
-                                            ui.add(
-                                                egui::Label::new(design::display(
-                                                    name.as_ref(),
-                                                    15.,
-                                                ))
-                                                .truncate(),
-                                            );
+                                            let filename = ui
+                                                .add(
+                                                    egui::Label::new(design::display(
+                                                        name.as_ref(),
+                                                        15.,
+                                                    ))
+                                                    .truncate()
+                                                    .sense(egui::Sense::click()),
+                                                )
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                .on_hover_text(format!(
+                                                    "Conserva questa copia\n{}",
+                                                    item.path.display()
+                                                ));
+                                            ui.ctx().accesskit_node_builder(filename.id, |node| {
+                                                node.set_description("Conserva questa copia");
+                                            });
+                                            choose_keeper |= filename.clicked();
                                             if reveal_link(ui, item, results, &page.req.roots)
                                                 .clicked()
                                             {
@@ -855,6 +879,10 @@ fn duplicate_group(
                                             }
                                         },
                                     );
+                                    if choose_keeper {
+                                        page.keepers.insert(group, i);
+                                        page.select(i, false);
+                                    }
                                     if !compact {
                                         copy_action(ui, page, i, protected, chosen, item);
                                     }
@@ -946,6 +974,32 @@ fn search(ui: &mut egui::Ui, page: &mut Page, mode: Mode, ctx: &egui::Context) {
             format!("{} visibili", number(page.count()))
         });
     });
+}
+
+fn space_file_name(
+    ui: &mut egui::Ui,
+    width: f32,
+    name: &str,
+    path: &Path,
+    reveal: &mut Option<PathBuf>,
+) {
+    let response = ui
+        .add_sized(
+            [width, 18.],
+            egui::Label::new(egui::RichText::new(name).strong())
+                .truncate()
+                .selectable(false)
+                .sense(egui::Sense::click()),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(format!("Mostra nel Finder\n{}", path.display()));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Button);
+        node.set_label(format!("Mostra nel Finder {}", path.display()));
+    });
+    if response.clicked() {
+        *reveal = Some(path.to_path_buf());
+    }
 }
 
 fn compact_row(ui: &mut egui::Ui) {
@@ -1210,6 +1264,199 @@ mod layout_tests {
             .nodes
             .iter()
             .any(|(_, n)| n.label().is_some_and(|s| s.starts_with("Da spostare"))));
+        let name = after
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some("a.bin") || n.value() == Some("a.bin"))
+            .and_then(|(_, n)| n.bounds())
+            .expect("visible name next to the keeper radio");
+        let position = egui::pos2(
+            ((name.x0 + name.x1) * 0.5) as f32,
+            ((name.y0 + name.y1) * 0.5) as f32,
+        );
+        for pressed in [true, false] {
+            let _ = draw(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        let page = &app.pages[&Mode::Duplicates];
+        assert_eq!(
+            page.keeper(1),
+            Some(0),
+            "clicking the file name should select its adjacent keeper radio"
+        );
+        assert_eq!(page.selected, HashSet::from([2]));
+        assert!(app.review.is_none() && !app.cleaning);
+    }
+
+    #[test]
+    fn map_directory_row_opens_from_details_and_leaves_finder_independent() {
+        let fixture = tempfile::Builder::new()
+            .prefix("lindo-row-")
+            .tempdir()
+            .unwrap();
+        let root = fixture.path().canonicalize().unwrap();
+        let target = root.join("cartella");
+        std::fs::create_dir(&target).unwrap();
+        for hit in ["size", "path", "blank", "finder", "busy", "file"] {
+            let is_file = hit == "file";
+            let path = if is_file {
+                let file = root.join("sample.bin");
+                std::fs::write(&file, b"test").unwrap();
+                file
+            } else {
+                target.clone()
+            };
+            let item = crate::model::Item {
+                path: path.clone(),
+                identity: crate::trash::Identity::read(&path).unwrap(),
+                bytes: 1234,
+                cloud: false,
+                group: None,
+            };
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            design::configure(&ctx);
+            let mut app = Lindo::new(&ctx);
+            app.mode = Some(Mode::Space);
+            // Suppress the native open -R side effect while exercising Finder's hit area.
+            app.revealing = true;
+            app.cleaning = hit == "busy";
+            let page = app.pages.get_mut(&Mode::Space).unwrap();
+            page.req.roots = vec![root.clone()];
+            page.install(Arc::new(Results::prepare(
+                Mode::Space,
+                Report {
+                    items: vec![item],
+                    ..Default::default()
+                },
+            )));
+            let draw = |app: &mut Lindo, events| {
+                ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(850., 600.),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default()
+                            .show(ctx, |ui| app.section(ui, Mode::Space, ctx));
+                    },
+                )
+                .platform_output
+                .accesskit_update
+                .unwrap()
+            };
+            let _ = draw(&mut app, vec![]);
+            let tree = draw(&mut app, vec![]);
+            let label = match hit {
+                "path" => path.to_str().unwrap(),
+                "finder" => "Finder",
+                _ => "1,2 KB",
+            };
+            let bounds = tree
+                .nodes
+                .iter()
+                .find(|(_, n)| n.label() == Some(label) || n.value() == Some(label))
+                .and_then(|(_, n)| n.bounds())
+                .unwrap_or_else(|| panic!("Missing {label}"));
+            let pos = egui::pos2(
+                if hit == "blank" {
+                    790.
+                } else {
+                    ((bounds.x0 + bounds.x1) * 0.5) as f32
+                },
+                ((bounds.y0 + bounds.y1) * 0.5) as f32,
+            );
+            for pressed in [true, false] {
+                let _ = draw(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+            let should_open = matches!(hit, "size" | "path" | "blank");
+            let page = &app.pages[&Mode::Space];
+            assert_eq!(
+                page.req.roots,
+                vec![if should_open {
+                    target.clone()
+                } else {
+                    root.clone()
+                }],
+                "hit {hit}"
+            );
+            assert_eq!(page.history.len(), usize::from(should_open), "hit {hit}");
+            assert_eq!(app.active.is_some(), should_open, "hit {hit}");
+        }
+    }
+
+    #[test]
+    fn map_file_name_dispatches_finder_path_without_launching_finder() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let path = Path::new("/test/sample.bin");
+        let label = format!("Mostra nel Finder {}", path.display());
+        let mut reveal = None;
+        let mut draw = |events| {
+            ctx.run(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        space_file_name(ui, 240., "sample.bin", path, &mut reveal)
+                    });
+                },
+            )
+            .platform_output
+            .accesskit_update
+            .unwrap()
+        };
+        let _ = draw(vec![]);
+        let tree = draw(vec![]);
+        let bounds = tree
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some(&label))
+            .and_then(|(_, n)| n.bounds())
+            .unwrap();
+        let pos = egui::pos2(
+            ((bounds.x0 + bounds.x1) * 0.5) as f32,
+            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+        );
+        for pressed in [true, false] {
+            let _ = draw(vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+        }
+        assert_eq!(reveal.as_deref(), Some(path));
     }
 
     #[test]

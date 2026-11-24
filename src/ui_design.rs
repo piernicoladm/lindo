@@ -74,6 +74,7 @@ pub(super) fn configure(ctx: &egui::Context) {
     v.faint_bg_color = SURFACE;
     v.code_bg_color = RAIL;
     v.hyperlink_color = LIME;
+    v.interact_cursor = Some(egui::CursorIcon::PointingHand);
     v.selection.bg_fill = Color32::from_rgb(58, 83, 63);
     v.selection.stroke = Stroke::new(1.6_f32, LIME);
     v.warn_fg_color = Color32::from_rgb(244, 204, 136);
@@ -247,5 +248,5 @@ pub(super) fn nav(ui: &mut Ui, dest: Destination, selected: bool) -> Response {
         FontId::proportional(16.),
         CREAM,
     );
-    response
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

@@ -1006,6 +1006,7 @@ impl Lindo {
                 (label, detail, None, Some(extra))
             }));
         let mut found = false;
+        let mut favorite_change = None;
         for favorite in [true, false] {
             for (name, detail, mode, extra) in tools.clone() {
                 if category.is_some_and(|c| {
@@ -1021,41 +1022,94 @@ impl Lindo {
                     continue;
                 }
                 found = true;
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .small_button(if favorite { "★" } else { "☆" })
-                        .on_hover_text(if favorite {
-                            "Rimuovi dai preferiti"
-                        } else {
-                            "Aggiungi ai preferiti"
-                        })
-                        .clicked()
-                    {
-                        if favorite {
-                            self.favorites.remove(name);
-                        } else {
-                            self.favorites.insert(name.to_owned());
-                        }
-                        objc2_foundation::NSUserDefaults::standardUserDefaults().setBool_forKey(
-                            !favorite,
-                            &objc2_foundation::NSString::from_str(&format!("tool.favorite.{name}")),
-                        );
-                    }
-                    if ui.button(name).clicked() {
-                        self.mode = mode;
-                        self.extra = extra;
-                    }
-                    if let Some(result) = mode.and_then(|m| self.pages[&m].result.as_ref()) {
-                        ui.small(format!(
-                            "{} risultati · {} errori",
-                            result.report.items.len(),
-                            result.report.errors
-                        ));
-                    }
+                let background = ui.painter().add(egui::Shape::Noop);
+                let response = ui
+                    .scope_builder(
+                        egui::UiBuilder::new()
+                            .id_salt(("catalog-tool", name))
+                            .sense(egui::Sense::click()),
+                        |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.add_space(4.);
+                            ui.horizontal_top(|ui| {
+                                let favorite_action = if favorite {
+                                    "Rimuovi dai preferiti"
+                                } else {
+                                    "Aggiungi ai preferiti"
+                                };
+                                let star = ui
+                                    .small_button(if favorite { "★" } else { "☆" })
+                                    .on_hover_text(favorite_action);
+                                star.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        ui.is_enabled(),
+                                        format!("{favorite_action} · {name}"),
+                                    )
+                                });
+                                if star.clicked() {
+                                    favorite_change = Some((name, !favorite));
+                                }
+                                ui.vertical(|ui| {
+                                    ui.add(
+                                        egui::Label::new(design::display(name, 17.))
+                                            .selectable(false),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(detail).small().color(MUTED),
+                                        )
+                                        .wrap()
+                                        .selectable(false),
+                                    );
+                                    if let Some(result) =
+                                        mode.and_then(|m| self.pages[&m].result.as_ref())
+                                    {
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(format!(
+                                                    "{} risultati · {} errori",
+                                                    result.report.items.len(),
+                                                    result.report.errors
+                                                ))
+                                                .small(),
+                                            )
+                                            .selectable(false),
+                                        );
+                                    }
+                                });
+                            });
+                            ui.add_space(4.);
+                        },
+                    )
+                    .response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name)
                 });
-                ui.small(detail);
+                if response.hovered() || response.has_focus() {
+                    ui.painter().set(
+                        background,
+                        egui::Shape::rect_filled(response.rect, 5., design::RAIL),
+                    );
+                }
+                if response.clicked() && favorite_change.is_none() {
+                    self.mode = mode;
+                    self.extra = extra;
+                }
                 ui.separator();
             }
+        }
+        if let Some((name, enabled)) = favorite_change {
+            if enabled {
+                self.favorites.insert(name.to_owned());
+            } else {
+                self.favorites.remove(name);
+            }
+            objc2_foundation::NSUserDefaults::standardUserDefaults().setBool_forKey(
+                enabled,
+                &objc2_foundation::NSString::from_str(&format!("tool.favorite.{name}")),
+            );
         }
         if !found {
             ui.label("Nessuno strumento corrisponde alla ricerca.");
@@ -1109,6 +1163,7 @@ mod tests {
         design::configure(&ctx);
         let mut app = Lindo::new(&ctx);
         let screen = std::cell::Cell::new(egui::vec2(660., 460.));
+        let show_catalog = std::cell::Cell::new(false);
         let frame = |app: &mut Lindo, events: Vec<egui::Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen.get())),
@@ -1116,7 +1171,13 @@ mod tests {
                 ..Default::default()
             };
             ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| app.overview(ui, ctx));
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    if show_catalog.get() {
+                        app.catalog(ui, None)
+                    } else {
+                        app.overview(ui, ctx)
+                    }
+                });
             })
             .shapes
             .into_iter()
@@ -1157,6 +1218,49 @@ mod tests {
                 );
             }
         };
+        show_catalog.set(true);
+        app.tool_query = "File grandi".to_owned();
+        render(&mut app);
+        click(&mut app, hint(Mode::Large));
+        let opened_from_description = app.mode == Some(Mode::Large);
+        app.mode = None;
+        let (_, title_pos) = frame(&mut app, vec![])
+            .into_iter()
+            .find(|(text, _)| text == "File grandi")
+            .unwrap();
+        let pos = egui::pos2(screen.get().x - 18., title_pos.y);
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        assert!(
+            opened_from_description && app.mode == Some(Mode::Large),
+            "File grandi did not open: description={opened_from_description}, empty row area={:?}",
+            app.mode
+        );
+        app.mode = None;
+        let original = app.favorites.contains("File grandi");
+        click(&mut app, if original { "★" } else { "☆" });
+        assert_ne!(app.favorites.contains("File grandi"), original);
+        assert!(
+            app.mode.is_none() && app.extra.is_none(),
+            "Star navigated away from the catalog"
+        );
+        click(&mut app, if original { "☆" } else { "★" });
+        assert_eq!(app.favorites.contains("File grandi"), original);
+        app.mode = None;
+        app.tool_query.clear();
+        show_catalog.set(false);
         app.home_panel.scopes = true;
         let scope = render(&mut app);
         let doc = home.join("Documents/visible.bin");
