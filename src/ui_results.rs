@@ -1051,3 +1051,97 @@ fn action_cell(
     cell.set_clip_rect(parent.clip_rect().intersect(rect));
     cell
 }
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn compact_review_actions_remain_in_view_and_share_a_row() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let mut report = Report::default();
+        for filename in ["one.bin", "two.bin"] {
+            let path = root.join(filename);
+            std::fs::write(&path, b"example").unwrap();
+            report.items.push(crate::model::Item {
+                identity: crate::trash::Identity::read(&path).unwrap(),
+                path,
+                bytes: 7,
+                group: Some(1),
+                cloud: false,
+            });
+        }
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        design::configure(&ctx);
+        let mut app = Lindo::new(&ctx);
+        app.mode = Some(Mode::Duplicates);
+        let page = app.pages.get_mut(&Mode::Duplicates).unwrap();
+        page.install(Arc::new(Results::prepare(Mode::Duplicates, report)));
+        page.select_visible();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(660., 460.));
+        for modal in [false, true] {
+            if modal {
+                app.review = Review::snapshot(&app.pages[&Mode::Duplicates]);
+                app.confirm = true;
+            }
+            // The second frame has the measured sizes of windows and modals.
+            for frame in 0..2 {
+                let mut bottom = 0.;
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::SidePanel::left("nav")
+                            .exact_width(160.)
+                            .show(ctx, |_| {});
+                        egui::TopBottomPanel::bottom("status")
+                            .exact_height(24.)
+                            .show(ctx, |_| {});
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            ui.add_space(58.);
+                            bottom = ui.max_rect().bottom();
+                            app.section(ui, Mode::Duplicates, ctx);
+                            if modal {
+                                app.review_page(ui, ctx);
+                            }
+                        });
+                    },
+                );
+                if frame == 0 {
+                    continue;
+                }
+                let tree = output.platform_output.accesskit_update.unwrap();
+                let bounds = |label: &str| {
+                    tree.nodes
+                        .iter()
+                        .find_map(|(_, node)| {
+                            if node.label() == Some(label) || node.value() == Some(label) {
+                                node.bounds()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_else(|| panic!("Missing accessible control {label}"))
+                };
+                let action = bounds(if modal {
+                    "Sposta nel Cestino"
+                } else {
+                    "Rivedi 7 B"
+                });
+                assert!(action.y1 <= f64::from(bottom) + 1. && action.x1 <= 660.);
+                if modal {
+                    let back = bounds("Indietro");
+                    assert!((action.y0 - back.y0).abs() < 3.);
+                    assert!(back.x1 < action.x0);
+                } else {
+                    let summary = bounds("1 copia selezionata");
+                    assert!(summary.y0 >= action.y0 - 2. && summary.y1 <= action.y1 + 2.);
+                }
+            }
+        }
+    }
+}
