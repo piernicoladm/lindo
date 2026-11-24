@@ -175,10 +175,10 @@
       "sha256": "926fc7984f99f53e90d874b7ce63dfd542f1f6029ab2bf54c7ec64b172e7be18"
     },
     {
-      "bytes": 13562,
+      "bytes": 13594,
       "mode": "0644",
       "path": "src/desktop_meter.rs",
-      "sha256": "2a8192d284443ef1c437057f654aa5a369e9182ad73403a33dc1f68a1bdf030f"
+      "sha256": "8b853c08bb0421ce05fd520464a57c80a8498f19678d59e5634735e1bd4b6dbf"
     },
     {
       "bytes": 572,
@@ -235,10 +235,10 @@
       "sha256": "a1d52e34900ad7f83530395a1b737df041702df6fb27333d8a6575d7230b1e83"
     },
     {
-      "bytes": 4140,
+      "bytes": 4160,
       "mode": "0644",
       "path": "src/menu_probe.rs",
-      "sha256": "bae1925e00474ea16f56ae61f3cba9a021b253be4f1aabf7caeac1874af5ef24"
+      "sha256": "c235184fdd112af29be887391434e6087799263d224248c4f392b82ab7286796"
     },
     {
       "bytes": 1377,

@@ -93,7 +93,7 @@ pub(super) fn start(item: Retained<NSStatusItem>) {
                     .collect();
                 for prefix in ["RAM ·", "Batteria ·", "Rete ·"] {
                     if !titles.iter().any(|s| s.starts_with(prefix)) {
-                        fail("missing sampled metric");
+                        fail(&format!("missing sampled metric: {prefix}"));
                     }
                 }
                 menu.performActionForItemAtIndex(index);
