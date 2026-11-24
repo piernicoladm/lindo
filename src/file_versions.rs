@@ -19,7 +19,8 @@ use std::{
 fn validate_doc(path: &Path, home: &Path) -> Result<Identity, String> {
     let denied =
         "Scegli un documento locale di tua proprietà, fuori dalle cartelle cloud e protette.";
-    if !path.is_absolute()
+    if !home.is_absolute()
+        || !path.is_absolute()
         || (!path.starts_with(home) && !path.starts_with("/Volumes"))
         || policy::protected(path, Mode::Large, None)
         || policy::cloud(path)
@@ -53,13 +54,7 @@ fn validate_doc(path: &Path, home: &Path) -> Result<Identity, String> {
         return Err(denied.into());
     }
     let fd = policy::open_file(path, libc::O_EVTONLY).map_err(|_| denied)?;
-    let m = fd.metadata().map_err(|_| denied)?;
-    if !m.is_file()
-        || m.uid() != unsafe { libc::getuid() }
-        || m.nlink() != 1
-        || !policy::local_path(path).map_err(|_| denied)?
-        || policy::provider_state(path, false).map_err(|_| denied)?.1
-    {
+    if policy::local_provider_state(path).map_err(|_| denied)? != (true, false) {
         return Err(denied.into());
     }
     let mut disk = std::mem::MaybeUninit::uninit();
@@ -68,7 +63,22 @@ fn validate_doc(path: &Path, home: &Path) -> Result<Identity, String> {
     {
         return Err(denied.into());
     }
-    Identity::read(path).map_err(|_| denied.into())
+    document_identity(path, &fd).map_err(|_| denied.into())
+}
+
+fn document_identity(path: &Path, fd: &std::fs::File) -> std::io::Result<Identity> {
+    let identity = Identity::read(path)?;
+    let metadata = fd.metadata()?;
+    if !metadata.is_file()
+        || metadata.uid() != unsafe { libc::getuid() }
+        || metadata.nlink() != 1
+        || !identity.matches_metadata(&metadata)
+    {
+        return Err(std::io::Error::other(
+            "Identità del documento non verificabile.",
+        ));
+    }
+    Ok(identity)
 }
 #[derive(Clone)]
 struct Row {
@@ -395,6 +405,33 @@ mod tests {
     use super::*;
     use objc2_foundation::NSFileVersionAddingOptions;
     use std::fs;
+    #[test]
+    fn version_history_rejects_document_replaced_after_open() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        let doc = home.join("draft.txt");
+        fs::write(&doc, b"original").unwrap();
+        let fd = policy::open_file(&doc, libc::O_EVTONLY).unwrap();
+        assert!(document_identity(&doc, &fd).is_ok());
+        fs::rename(&doc, home.join("previous.txt")).unwrap();
+        fs::write(&doc, b"replaced").unwrap();
+        assert!(document_identity(&doc, &fd).is_err());
+    }
+
+    #[test]
+    fn version_history_requires_absolute_home() {
+        let temp = tempfile::Builder::new()
+            .prefix("Lindo-doc-")
+            .tempdir()
+            .unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        let doc = home.join("draft.txt");
+        fs::write(&doc, b"local document").unwrap();
+        assert!(validate_doc(&doc, Path::new("")).is_err());
+        assert!(validate_doc(&doc, Path::new("relative")).is_err());
+        assert!(validate_doc(&doc, &home).is_ok());
+    }
+
     #[test]
     fn requires_exact_unique_historical_local_identifier() {
         assert!(eligible(&5, &5, &9, 1, true, false));

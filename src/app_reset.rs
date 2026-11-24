@@ -212,7 +212,13 @@ fn app_path(home: &Path, p: &Path) -> bool {
 fn tool(exe: &str, args: &[&str], stop: &AtomicBool) -> Result<String> {
     // The shared runner uses its no-materialization child policy for an explicit input file.
     let empty = tempfile::tempfile().map_err(|e| e.to_string())?;
-    let out = command::run(exe, args, Some(empty), stop, 45)?;
+    // codesign emits display metadata on stderr, including signature details.
+    let run = if exe == "/usr/bin/codesign" {
+        command::run
+    } else {
+        command::run_stdout
+    };
+    let out = run(exe, args, Some(empty), stop, 45)?;
     if out.code != Some(0) || out.truncated {
         return Err(format!(
             "Verifica non riuscita con {}.",
@@ -468,20 +474,8 @@ fn backup_label(path: &Path) -> String {
         .and_then(|n| n.split_once('-'))
         .and_then(|(n, _)| n.parse::<u128>().ok())
         .and_then(|v| libc::time_t::try_from(v / 1_000_000_000).ok());
-    if let Some(stamp) = stamp {
-        let mut t = std::mem::MaybeUninit::<libc::tm>::uninit();
-        if !unsafe { libc::localtime_r(&stamp, t.as_mut_ptr()) }.is_null() {
-            let t = unsafe { t.assume_init() };
-            return format!(
-                "Rivedi copia del {:02}/{:02}/{:04} alle {:02}:{:02}:{:02}",
-                t.tm_mday,
-                t.tm_mon + 1,
-                t.tm_year + 1900,
-                t.tm_hour,
-                t.tm_min,
-                t.tm_sec
-            );
-        }
+    if let Some(moment) = stamp.and_then(crate::model::local_timestamp) {
+        return format!("Rivedi copia del {moment}");
     }
     "Rivedi copia salvata".into()
 }
@@ -599,7 +593,7 @@ fn audit_bundle(app: &App, stop: &AtomicBool) -> Result<String> {
 #[derive(Clone)]
 enum Action {
     Reset,
-    Restore(PathBuf, Identity, [u8; 32]),
+    Restore(PathBuf, Box<Identity>, [u8; 32]),
 }
 fn apply(review: &Preview, action: &Action, stop: &AtomicBool) -> Result<String> {
     let _guard = policy::LocalOnly::enter().map_err(|e| e.to_string())?;
@@ -639,7 +633,7 @@ fn apply(review: &Preview, action: &Action, stop: &AtomicBool) -> Result<String>
                 return Err("Copia fuori dall’archivio dell’app.".into());
             }
             let (bytes, id) = backup_bytes(path)?;
-            if &id != identity || <[u8; 32]>::from(Sha256::digest(&bytes)) != *digest {
+            if &id != identity.as_ref() || <[u8; 32]>::from(Sha256::digest(&bytes)) != *digest {
                 return Err("La copia selezionata è cambiata.".into());
             }
             if !absent(&physical)? && plist(&safe_bytes(&physical, false)?.0)?.count() != 0 {
@@ -652,7 +646,7 @@ fn apply(review: &Preview, action: &Action, stop: &AtomicBool) -> Result<String>
     }
 }
 enum Reply {
-    Inspected(Preview),
+    Inspected(Box<Preview>),
     Reviewed(Action),
     Done(String),
 }
@@ -703,7 +697,7 @@ impl AppReset {
                 Ok(result) => {
                     self.work.take();
                     match result {
-                        Ok(Reply::Inspected(v)) => self.preview = Some(v),
+                        Ok(Reply::Inspected(v)) => self.preview = Some(*v),
                         Ok(Reply::Reviewed(a)) => self.action = Some(a),
                         Ok(Reply::Done(s)) => {
                             self.preview = None;
@@ -796,7 +790,9 @@ impl AppReset {
             };
             let audit = self.audit;
             self.submit(ctx, false, move |stop| {
-                inspect(&path, audit, stop).map(Reply::Inspected)
+                inspect(&path, audit, stop)
+                    .map(Box::new)
+                    .map(Reply::Inspected)
             });
             return;
         }
@@ -849,7 +845,7 @@ impl AppReset {
                     plist(&bytes)?;
                     Ok(Reply::Reviewed(Action::Restore(
                         path,
-                        id,
+                        Box::new(id),
                         Sha256::digest(bytes).into(),
                     )))
                 });

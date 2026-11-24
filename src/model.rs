@@ -56,10 +56,39 @@ pub struct SpaceStats {
     pub errors: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct FolderMeasurement {
+    pub root: (u64, u64),
+    pub observed: u64,
+    pub volume_free: Option<u64>,
+    pub measured_at: String,
+    pub skipped: u64,
+    pub errors: u64,
+}
+
+pub(crate) fn local_timestamp(stamp: libc::time_t) -> Option<String> {
+    let mut time = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // localtime_r writes to our buffer only on success.
+    if unsafe { libc::localtime_r(&stamp, time.as_mut_ptr()) }.is_null() {
+        return None;
+    }
+    let t = unsafe { time.assume_init() };
+    Some(format!(
+        "{:02}/{:02}/{:04} alle {:02}:{:02}:{:02}",
+        t.tm_mday,
+        t.tm_mon + 1,
+        t.tm_year + 1900,
+        t.tm_hour,
+        t.tm_min,
+        t.tm_sec
+    ))
+}
+
 #[derive(Default, Debug)]
 pub struct Report {
     pub items: Vec<Item>,
     pub space: HashMap<PathBuf, SpaceStats>,
+    pub measurement: Option<FolderMeasurement>,
     pub visited: u64,
     pub skipped: u64,
     pub errors: u64,

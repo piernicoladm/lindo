@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 const MAX_ENTRIES: usize = 4_000;
 const MAX_REPORTS: usize = 32;
+const MAX_ATTEMPTS: u8 = 3;
 type Stamp = (u64, u64, i64, i64, i64);
 type Inventory = BTreeMap<PathBuf, Stamp>;
 
@@ -25,6 +26,7 @@ struct State {
     latest: VecDeque<security_scan::Finding>,
     excluded: usize,
     pending: usize,
+    exhausted: usize,
     failures: u64,
     last_error: String,
     running: bool,
@@ -143,6 +145,126 @@ fn inventory(
     Ok((data, excluded))
 }
 
+struct Retry {
+    stamp: Stamp,
+    attempts: u8,
+    next_cycle: u64,
+}
+
+struct Tracker {
+    previous: Inventory,
+    processed: Inventory,
+    retries: BTreeMap<PathBuf, Retry>,
+    cycle: u64,
+}
+
+impl Tracker {
+    fn new(baseline: Inventory) -> Self {
+        Self {
+            processed: baseline.clone(),
+            previous: baseline,
+            retries: BTreeMap::new(),
+            cycle: 0,
+        }
+    }
+
+    fn observe(
+        &mut self,
+        current: Inventory,
+        cancel: &AtomicBool,
+        state: &Mutex<State>,
+        ctx: &egui::Context,
+        mut inspect: impl FnMut(
+            &Path,
+        )
+            -> Result<(command::Output, Option<security_scan::Finding>), String>,
+    ) {
+        self.cycle = self.cycle.saturating_add(1);
+        self.processed
+            .retain(|path, stamp| current.get(path) == Some(stamp));
+        self.retries
+            .retain(|path, retry| current.get(path) == Some(&retry.stamp));
+        let exhausted = self
+            .retries
+            .values()
+            .filter(|r| r.attempts >= MAX_ATTEMPTS)
+            .count();
+        {
+            let mut s = state.lock().unwrap();
+            s.exhausted = exhausted;
+            s.pending = current.len() - self.processed.len() - exhausted;
+        }
+        let candidates: Vec<_> = current
+            .iter()
+            .filter(|(path, stamp)| {
+                self.previous.get(*path) == Some(*stamp)
+                    && !self.processed.contains_key(*path)
+                    && self
+                        .retries
+                        .get(*path)
+                        .is_none_or(|r| r.attempts < MAX_ATTEMPTS && r.next_cycle <= self.cycle)
+            })
+            .take(3)
+            .collect();
+        for (path, stamp) in candidates {
+            if cancel.load(Ordering::Acquire) {
+                break;
+            }
+            let result = inspect(path).and_then(|(output, finding)| {
+                if finding.is_some() || scanned_clean(&output) {
+                    Ok(finding)
+                } else {
+                    Err(format!(
+                        "Scansione ClamAV incompleta. {}",
+                        output.text.chars().take(600).collect::<String>()
+                    ))
+                }
+            });
+            if cancel.load(Ordering::Acquire) {
+                break;
+            }
+            let mut s = state.lock().unwrap();
+            match result {
+                Ok(finding) => {
+                    self.retries.remove(path);
+                    self.processed.insert(path.clone(), *stamp);
+                    s.scanned += 1;
+                    s.pending -= 1;
+                    if let Some(f) = finding {
+                        s.alerts += 1;
+                        s.latest.push_front(f);
+                        s.latest.truncate(MAX_REPORTS);
+                    }
+                }
+                Err(error) => {
+                    let retry = self.retries.entry(path.clone()).or_insert(Retry {
+                        stamp: *stamp,
+                        attempts: 0,
+                        next_cycle: 0,
+                    });
+                    retry.attempts += 1;
+                    retry.next_cycle = self.cycle.saturating_add(u64::from(retry.attempts));
+                    s.failures += 1;
+                    s.last_error = format!(
+                        "Ultimo errore, tentativo {}/{} per {}. {}",
+                        retry.attempts,
+                        MAX_ATTEMPTS,
+                        path.display(),
+                        error
+                    );
+                    if retry.attempts == MAX_ATTEMPTS {
+                        s.exhausted += 1;
+                        s.pending -= 1;
+                    }
+                }
+            }
+            drop(s);
+            ctx.request_repaint();
+        }
+        self.previous = current;
+    }
+}
+
 fn watch(
     root: &Path,
     cancel: &AtomicBool,
@@ -173,8 +295,8 @@ fn watch(
         );
     }
     let original = root_node(root)?;
-    let (mut previous, excluded) = inventory(root, original, cancel)?;
-    let mut processed = previous.clone();
+    let (baseline, excluded) = inventory(root, original, cancel)?;
+    let mut tracker = Tracker::new(baseline);
     {
         let mut s = state.lock().unwrap();
         s.excluded = excluded;
@@ -187,55 +309,10 @@ fn watch(
             break;
         }
         let (current, excluded) = inventory(root, original, cancel)?;
-        processed.retain(|path, _| current.contains_key(path));
-        let pending = current
-            .iter()
-            .filter(|(p, stamp)| processed.get(*p) != Some(*stamp))
-            .count();
         state.lock().unwrap().excluded = excluded;
-        state.lock().unwrap().pending = pending;
-        for (path, stamp) in current
-            .iter()
-            .filter(|(p, stamp)| {
-                previous.get(*p) == Some(*stamp) && processed.get(*p) != Some(*stamp)
-            })
-            .take(3)
-            .map(|(p, s)| (p.clone(), *s))
-            .collect::<Vec<_>>()
-        {
-            if cancel.load(Ordering::Acquire) {
-                return Ok(());
-            }
-            let result = security_scan::inspect_file(scanner, &path, cancel);
-            if cancel.load(Ordering::Acquire) {
-                return Ok(());
-            }
-            let mut s = state.lock().unwrap();
-            match result {
-                Ok((_, Some(f))) => {
-                    s.scanned += 1;
-                    s.alerts += 1;
-                    s.latest.push_front(f);
-                    s.latest.truncate(MAX_REPORTS);
-                }
-                Ok((r, None)) if scanned_clean(&r) => s.scanned += 1,
-                Ok((r, None)) => {
-                    return Err(format!(
-                        "Monitor fermato: ClamAV non ha completato la scansione. {}",
-                        r.text.chars().take(600).collect::<String>()
-                    ))
-                }
-                Err(e) => {
-                    s.failures += 1;
-                    s.last_error = e;
-                }
-            }
-            processed.insert(path, stamp);
-            s.pending = s.pending.saturating_sub(1);
-            drop(s);
-            ctx.request_repaint();
-        }
-        previous = current;
+        tracker.observe(current, cancel, state, ctx, |path| {
+            security_scan::inspect_file(scanner, path, cancel)
+        });
     }
     Ok(())
 }
@@ -280,6 +357,10 @@ impl Monitor {
                 } else {
                     result.err().unwrap_or_else(|| "Monitor arrestato.".into())
                 };
+                if s.pending > 0 || s.exhausted > 0 {
+                    s.status
+                        .push_str(" Copertura incompleta per i file osservati.");
+                }
                 drop(s);
                 repaint.request_repaint();
             })
@@ -301,7 +382,7 @@ impl Monitor {
     ) -> Vec<security_scan::Finding> {
         ui.separator();
         ui.strong("Monitor della cartella");
-        ui.label("Con Lindo aperta, confronta i metadati della cartella e delle sottocartelle a intervalli di almeno 3 secondi. Analizza fino a 3 file nuovi o modificati per ciclo dopo due osservazioni stabili. Il monitor si ferma se l’inventario supera 4.000 voci o 15 secondi. I file già presenti all’avvio richiedono una scansione manuale. Un file creato e subito rimosso può sfuggire al controllo. La scansione avviene dopo la scrittura e non blocca l’esecuzione.");
+        ui.label("Con Lindo aperta, confronta i metadati della cartella e delle sottocartelle a intervalli di almeno 3 secondi. Analizza fino a 3 file nuovi o modificati per ciclo dopo due osservazioni stabili. Dopo un errore riprova al ciclo successivo e, se necessario, dopo altri due cicli. Dopo tre tentativi attende una modifica del file. Il monitor si ferma se l’inventario supera 4.000 voci o 15 secondi. I file già presenti all’avvio richiedono una scansione manuale. Un file creato e subito rimosso può sfuggire al controllo. La scansione avviene dopo la scrittura e non blocca l’esecuzione.");
         let running = self
             .session
             .as_ref()
@@ -326,7 +407,7 @@ impl Monitor {
         if s.running && ui.button("Ferma monitor").clicked() {
             session.stop();
         }
-        ui.label(format!("File analizzati: {} · Segnalazioni: {} · In attesa: {} · Esclusi nell’ultimo inventario: {} · Controlli incompleti: {}",s.scanned,s.alerts,s.pending,s.excluded,s.failures));
+        ui.label(format!("File analizzati: {} · Segnalazioni: {} · In attesa: {} · File con tentativi esauriti: {} · Esclusi nell’ultimo inventario: {} · Tentativi falliti nella sessione: {}",s.scanned,s.alerts,s.pending,s.exhausted,s.excluded,s.failures));
         if !s.last_error.is_empty() {
             ui.label(s.last_error);
         }
@@ -372,6 +453,84 @@ impl Monitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn clean_output() -> command::Output {
+        command::Output {
+            code: Some(0),
+            text: "Scanned files: 1".into(),
+            truncated: false,
+        }
+    }
+
+    #[test]
+    fn transient_failure_retries_unchanged_file() {
+        let current = Inventory::from([(PathBuf::from("fixture"), (1, 1, 6, 1, 0))]);
+        let mut tracker = Tracker::new(Inventory::new());
+        let state = Mutex::new(State::default());
+        let cancel = AtomicBool::new(false);
+        let ctx = egui::Context::default();
+        let mut calls = 0;
+        for cycle in 1..=4 {
+            tracker.observe(current.clone(), &cancel, &state, &ctx, |_| {
+                calls += 1;
+                if calls == 1 {
+                    Err("Lettura temporaneamente fallita".into())
+                } else {
+                    Ok((clean_output(), None))
+                }
+            });
+            let s = state.lock().unwrap();
+            assert_eq!(s.pending, usize::from(cycle < 3));
+            assert_eq!(s.scanned, u64::from(cycle >= 3));
+            assert_eq!(s.exhausted, 0);
+        }
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn exhausted_file_waits_for_new_stamp() {
+        let path = PathBuf::from("fixture");
+        let mut current = Inventory::from([(path.clone(), (1, 1, 6, 1, 0))]);
+        let mut tracker = Tracker::new(Inventory::new());
+        let state = Mutex::new(State::default());
+        let ctx = egui::Context::default();
+        let cancel = AtomicBool::new(false);
+        let mut attempt_cycles = Vec::new();
+        for cycle in 1..=10 {
+            tracker.observe(current.clone(), &cancel, &state, &ctx, |_| {
+                attempt_cycles.push(cycle);
+                Ok((
+                    command::Output {
+                        code: Some(2),
+                        text: "Scanner error".into(),
+                        truncated: false,
+                    },
+                    None,
+                ))
+            });
+        }
+        assert_eq!(attempt_cycles, [2, 3, 5]);
+        {
+            let s = state.lock().unwrap();
+            assert_eq!(
+                (s.scanned, s.pending, s.exhausted, s.failures),
+                (0, 0, 1, 3)
+            );
+        }
+        current.insert(path, (1, 1, 6, 2, 0));
+        tracker.observe(current.clone(), &cancel, &state, &ctx, |_| {
+            panic!("Unstable stamp")
+        });
+        {
+            let s = state.lock().unwrap();
+            assert_eq!((s.pending, s.exhausted), (1, 0));
+        }
+        tracker.observe(current, &cancel, &state, &ctx, |_| {
+            Ok((clean_output(), None))
+        });
+        let s = state.lock().unwrap();
+        assert_eq!((s.scanned, s.pending, s.exhausted), (1, 0, 0));
+    }
+
     fn wait_for(session: &Session, predicate: impl Fn(&State) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(90);
         loop {

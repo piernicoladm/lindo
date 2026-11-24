@@ -87,7 +87,7 @@ fn public_ip(ip: IpAddr) -> bool {
     }
 }
 fn dns(host: &str, stop: &AtomicBool) -> Result<IpAddr, String> {
-    let output = command::run(
+    let output = command::run_stdout(
         "/usr/bin/dscacheutil",
         &["-q", "host", "-a", "name", host],
         None,
@@ -126,7 +126,7 @@ fn fetch(mut feed: Url, stop: &AtomicBool) -> Result<Vec<u8>, String> {
             .path()
             .to_str()
             .ok_or("Percorso temporaneo non valido.")?;
-        let result = command::run(
+        let result = command::run_stdout(
             "/usr/bin/curl",
             &[
                 "--disable",
@@ -187,7 +187,7 @@ fn plist(path: &Path, key: &str, stop: &AtomicBool) -> Option<String> {
     if !meta.is_file() || meta.len() > 1024 * 1024 {
         return None;
     }
-    let output = command::run(
+    let output = command::run_stdout(
         "/usr/bin/plutil",
         &["-extract", key, "raw", "-o", "-", "-"],
         Some(f),
@@ -474,7 +474,7 @@ fn latest(xml: &[u8], build: &str, system: &str) -> Result<String, String> {
 }
 fn check(app: &App, stop: &AtomicBool) -> Result<String, String> {
     current(app, stop)?;
-    let os = command::run("/usr/bin/sw_vers", &["-productVersion"], None, stop, 5)?;
+    let os = command::run_stdout("/usr/bin/sw_vers", &["-productVersion"], None, stop, 5)?;
     if os.code != Some(0) {
         return Err("Versione macOS non disponibile.".into());
     }

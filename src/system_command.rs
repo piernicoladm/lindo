@@ -57,6 +57,27 @@ pub(crate) fn run(
     cancel: &AtomicBool,
     seconds: u64,
 ) -> Result<Output, String> {
+    capture(executable, args, input, cancel, seconds, false)
+}
+
+pub(crate) fn run_stdout(
+    executable: &str,
+    args: &[&str],
+    input: Option<File>,
+    cancel: &AtomicBool,
+    seconds: u64,
+) -> Result<Output, String> {
+    capture(executable, args, input, cancel, seconds, true)
+}
+
+fn capture(
+    executable: &str,
+    args: &[&str],
+    input: Option<File>,
+    cancel: &AtomicBool,
+    seconds: u64,
+    stdout_on_success: bool,
+) -> Result<Output, String> {
     if cancel.load(Ordering::Acquire) {
         return Err("Operazione annullata.".into());
     }
@@ -91,6 +112,7 @@ pub(crate) fn run(
     let mut data = Vec::new();
     let mut err = Vec::new();
     let mut clipped = false;
+    let mut stderr_clipped = false;
     let result = (|| {
         nonblocking(stdout.as_raw_fd())
             .and_then(|_| nonblocking(stderr.as_raw_fd()))
@@ -104,10 +126,11 @@ pub(crate) fn run(
             }
             let status = child.try_wait().map_err(|e| e.to_string())?;
             drain(&mut stdout, &mut data, &mut clipped)
-                .and_then(|_| drain(&mut stderr, &mut err, &mut clipped))
+                .and_then(|_| drain(&mut stderr, &mut err, &mut stderr_clipped))
                 .map_err(|e| e.to_string())?;
             if let Some(status) = status {
-                if !err.is_empty() {
+                if (!stdout_on_success || !status.success()) && !err.is_empty() {
+                    clipped |= stderr_clipped;
                     data.push(b'\n');
                     data.extend(err);
                 }
@@ -125,4 +148,54 @@ pub(crate) fn run(
         terminate(&mut child);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structured_capture_bounds_stdout_independently_of_stderr() {
+        let stop = AtomicBool::new(false);
+        let out = run_stdout(
+            "/bin/sh",
+            &["-c", "echo '[]'; /usr/bin/head -c 110000 /dev/zero >&2"],
+            None,
+            &stop,
+            5,
+        )
+        .unwrap();
+        assert_eq!(out.code, Some(0));
+        assert_eq!(out.text, "[]");
+        assert!(!out.truncated);
+        let out = run_stdout(
+            "/usr/bin/head",
+            &["-c", "110000", "/dev/zero"],
+            None,
+            &stop,
+            5,
+        )
+        .unwrap();
+        assert!(out.truncated);
+        assert_eq!(out.text.len(), LIMIT);
+    }
+
+    #[test]
+    fn structured_capture_keeps_success_json_and_failure_diagnostics() {
+        let stop = AtomicBool::new(false);
+        let script = r#"echo '{"rows":[]}'; echo warning >&2; exit "$1""#;
+        for code in ["0", "3"] {
+            let out =
+                run_stdout("/bin/sh", &["-c", script, "fixture", code], None, &stop, 5).unwrap();
+            assert_eq!(out.code, code.parse().ok());
+            if code == "0" {
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(&out.text).unwrap()["rows"],
+                    serde_json::json!([])
+                );
+            } else {
+                assert!(out.text.contains("warning"));
+            }
+        }
+    }
 }

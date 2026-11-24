@@ -73,7 +73,7 @@ fn api(endpoint: &str, stop: &AtomicBool) -> Result<Vec<Model>, String> {
         "ps" => "http://127.0.0.1:11434/api/ps",
         _ => return Err("Endpoint non supportato.".into()),
     };
-    let out = command::run(
+    let out = command::run_stdout(
         "/usr/bin/curl",
         &[
             "--disable",

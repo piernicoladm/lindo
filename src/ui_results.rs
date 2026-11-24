@@ -294,29 +294,32 @@ impl Lindo {
                     });
                 }
                 if mode == Mode::Space {
-                    ui.label(format!("{} allocati", size(results.total)));
-                    if let Some(root) = page.req.roots.first() {
+                    ui.label(format!("{} osservati nella cartella", size(results.total)));
+                    if let ([root], Some(now)) = (page.req.roots.as_slice(), &r.measurement) {
+                        let volume = now.volume_free.map(size).unwrap_or_else(|| "dato non disponibile".into());
+                        ui.small(format!("Spazio libero sul volume · {volume}"))
+                            .on_hover_text(format!("Misurato il {}", now.measured_at));
                         if let Some(previous) = self.baselines.get(root) {
-                            let difference = results.total.abs_diff(*previous);
-                            let direction = if results.total >= *previous {
-                                "+"
+                            if previous.root == now.root {
+                                let direction = if now.observed >= previous.observed { "+" } else { "−" };
+                                let change = size(now.observed.abs_diff(previous.observed));
+                                ui.small(format!("Cartella {direction}{change} dal {}", previous.measured_at))
+                                    .on_hover_text(format!(
+                                        "Misura salvata: {} esclusi, {} errori. Misura attuale: {} esclusi, {} errori.",
+                                        previous.skipped, previous.errors, now.skipped, now.errors
+                                    ));
+                                if previous.errors > 0 || now.errors > 0 {
+                                    ui.small("Confronto parziale");
+                                }
                             } else {
-                                "−"
-                            };
-                            ui.label(format!(
-                                "{direction}{} dalla misura salvata",
-                                size(difference)
-                            ));
+                                ui.small("Cartella sostituita. Salva una nuova misura.");
+                            }
                         }
-                        if ui
-                        .small_button("Salva misura")
-                        .on_hover_text(
-                            "Usa il totale di questa cartella come riferimento per la sessione.",
-                        )
-                        .clicked()
-                    {
-                        self.baselines.insert(root.clone(), results.total);
-                    }
+                        if ui.small_button("Salva misura")
+                            .on_hover_text("Conserva la misura di questa cartella nella sessione.")
+                            .clicked() {
+                            self.baselines.insert(root.clone(), now.clone());
+                        }
                     }
                 }
             });
@@ -574,8 +577,8 @@ impl Lindo {
         } else {
             0
         };
-        let compact = ctx.screen_rect().width() < 590.;
-        let padding = if compact { 16 } else { 28 };
+        let compact = ctx.screen_rect().width() <= 700. || ctx.screen_rect().height() <= 500.;
+        let padding = if compact { 12 } else { 28 };
         let frame = egui::Frame::new()
             .fill(design::CANVAS)
             .stroke(egui::Stroke::new(1.0_f32, design::MUTED))
@@ -593,12 +596,21 @@ impl Lindo {
         let mut reveal = None;
         let response = modal.show(ctx, |ui| {
             ui.set_width((panel.width() - f32::from(padding) * 2. - 12.).clamp(180., 525.));
+            let top = ui.cursor().top();
             let heading = if self.confirm { "Spostare nel Cestino?" } else { "Rivedi la selezione" };
             ui.label(design::display(heading, if compact { 23. } else { 32. }));
-            let summary = format!("{} · {}", item_count(review.moves.len()), size(review.total));
+            let summary = format!("{} · Dimensione logica selezionata {}", item_count(review.moves.len()), size(review.total));
             ui.label(egui::RichText::new(summary).size(17.).color(design::CREAM));
             if !direct { ui.small(&review.label); }
-            ui.add_space(10.);
+            if review.allocation.incomplete {
+                ui.label("Stima dopo lo svuotamento non disponibile per tutta la selezione.");
+            } else {
+                ui.label(format!("Stima dopo lo svuotamento: {}. Cloni e snapshot APFS possono ridurla.", size(review.allocation.bytes)));
+            }
+            if review.allocation.linked_names > 0 {
+                ui.small(format!("Percorsi selezionati con hard link: {}. I blocchi contano una volta, solo se selezioni tutti i nomi.", review.allocation.linked_names));
+            }
+            ui.add_space(4.);
             if hidden > 0 {
                 let warning = format!("La selezione include {} nascosti dal filtro.", item_count(hidden));
                 ui.colored_label(ui.visuals().warn_fg_color, warning);
@@ -610,7 +622,9 @@ impl Lindo {
                 );
                 ui.colored_label(ui.visuals().warn_fg_color, warning);
             }
-            let height = (ctx.screen_rect().height() * 0.42).clamp(72., 330.);
+            let footer = 62.;
+            let used = ui.cursor().top() - top;
+            let height = (panel.height() - used - f32::from(padding) * 2. - footer - 16.).clamp(1., 330.);
             egui::ScrollArea::vertical().id_salt("review-items").max_height(height)
                 .show_rows(ui, 54., review.rows.len(), |ui, rows| {
                     for row in rows {
@@ -625,6 +639,9 @@ impl Lindo {
                                     ui.horizontal(|ui| {
                                         let label = if keep { "Resta sul Mac" } else { "Nel Cestino" };
                                         ui.label(design::display(label, 16.));
+                                        if let Some((links, _)) = item.identity.file_allocation().filter(|(links, _)| *links > 1) {
+                                            ui.small(format!("Hard link · {links} nomi"));
+                                        }
                                         if let Some(group) = item.group {
                                             if review.keepers.len() > 1 { ui.small(format!("Gruppo {group}")); }
                                             if keep && review.keepers.get(&group) == Some(&index) {
@@ -642,8 +659,7 @@ impl Lindo {
                     }
                 });
             ui.add_space(8.);
-            ui.label("Lo spazio si libera quando svuoti il Cestino.");
-            ui.add_space(14.);
+
             let (actions,_) = ui.allocate_exact_size(egui::vec2(ui.available_width(),38.),egui::Sense::hover());
             let mut left=action_cell(ui,actions,false,"back",170.);
             back=left.add_sized([left.available_width().min(92.),36.],egui::Button::new("Indietro")).clicked();
@@ -1464,15 +1480,19 @@ mod layout_tests {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
         let mut report = Report::default();
-        for filename in ["one.bin", "two.bin"] {
-            let path = root.join(filename);
-            std::fs::write(&path, b"example").unwrap();
+        for index in 0..12 {
+            let path = root.join(format!("{index:02}.bin"));
+            if index == 1 {
+                std::fs::hard_link(root.join("00.bin"), &path).unwrap();
+            } else {
+                std::fs::write(&path, b"example").unwrap();
+            }
             report.items.push(crate::model::Item {
                 identity: crate::trash::Identity::read(&path).unwrap(),
                 path,
                 bytes: 7,
                 group: Some(1),
-                cloud: false,
+                cloud: true,
             });
         }
         let ctx = egui::Context::default();
@@ -1482,10 +1502,12 @@ mod layout_tests {
         app.mode = Some(Mode::Duplicates);
         let page = app.pages.get_mut(&Mode::Duplicates).unwrap();
         page.install(Arc::new(Results::prepare(Mode::Duplicates, report)));
-        page.select_visible();
+        page.select(1, true);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(660., 460.));
         for modal in [false, true] {
             if modal {
+                let page = app.pages.get_mut(&Mode::Duplicates).unwrap();
+                page.selected_visible = 0;
                 app.review = Review::snapshot(&app.pages[&Mode::Duplicates]);
                 app.confirm = true;
             }
@@ -1537,6 +1559,18 @@ mod layout_tests {
                 });
                 assert!(action.y1 <= f64::from(bottom) + 1. && action.x1 <= 660.);
                 if modal {
+                    assert!(tree.nodes.iter().any(|(_, n)| n
+                        .label()
+                        .or(n.value())
+                        .is_some_and(|s| s.contains("nascosti dal filtro"))));
+                    assert!(tree.nodes.iter().any(|(_, n)| n
+                        .label()
+                        .or(n.value())
+                        .is_some_and(|s| s.contains("sincronizzate"))));
+                    assert!(tree.nodes.iter().any(|(_, n)| n
+                        .label()
+                        .or(n.value())
+                        .is_some_and(|s| s.contains("Stima dopo lo svuotamento: 0 B"))));
                     let back = bounds("Indietro");
                     assert!((action.y0 - back.y0).abs() < 3.);
                     assert!(back.x1 < action.x0);

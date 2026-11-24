@@ -68,12 +68,15 @@ impl Node {
         }
     }
     fn read(path: &Path) -> io::Result<Self> {
+        Self::stat(path).map(Self::from_stat)
+    }
+    fn stat(path: &Path) -> io::Result<libc::stat> {
         let name = CString::new(path.as_os_str().as_bytes())?;
         let mut value = MaybeUninit::uninit();
         if unsafe { libc::lstat(name.as_ptr(), value.as_mut_ptr()) } != 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self::from_stat(unsafe { value.assume_init() }))
+        Ok(unsafe { value.assume_init() })
     }
     fn kind(&self) -> u16 {
         self.mode & libc::S_IFMT
@@ -100,12 +103,21 @@ impl TreeKind {
         }
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Identity {
     entry: Node,
+    allocated: u64,
     parents: Arc<[(u64, u64, u16)]>,
     tree: Option<(TreeKind, [u8; 32])>,
 }
+
+// Allocation is an estimate from the scan, independent of identity verification.
+impl PartialEq for Identity {
+    fn eq(&self, other: &Self) -> bool {
+        self.entry == other.entry && self.parents == other.parents && self.tree == other.tree
+    }
+}
+impl Eq for Identity {}
 
 impl Identity {
     pub fn read(path: &Path) -> io::Result<Self> {
@@ -121,15 +133,12 @@ impl Identity {
             }
             parents.push((node.device, node.inode, node.mode));
         }
-        let entry = Node::read(path)?;
+        let stat = Node::stat(path)?;
+        let entry = Node::from_stat(stat);
         if !matches!(entry.kind(), libc::S_IFREG | libc::S_IFDIR) || entry.flags & 0x40000000 != 0 {
             return Err(denied());
         }
-        Ok(Self {
-            entry,
-            parents: parents.into(),
-            tree: None,
-        })
+        Ok(Self::from_stat_and_parents(stat, parents.into()))
     }
     pub fn is_dir(&self) -> bool {
         self.entry.kind() == libc::S_IFDIR
@@ -142,6 +151,7 @@ impl Identity {
     pub fn from_stat_and_parents(stat: libc::stat, parents: Arc<[(u64, u64, u16)]>) -> Self {
         Self {
             entry: Node::from_stat(stat),
+            allocated: (stat.st_blocks.max(0) as u64).saturating_mul(512),
             parents,
             tree: None,
         }
@@ -161,6 +171,9 @@ impl Identity {
             && s.size == value.size()
             && s.modified == (value.mtime(), value.mtime_nsec())
             && s.changed == (value.ctime(), value.ctime_nsec())
+    }
+    pub(crate) fn file_allocation(&self) -> Option<(u16, u64)> {
+        (!self.is_dir()).then_some((self.entry.links, self.allocated))
     }
     pub fn node(&self) -> (u64, u64) {
         self.entry.key()
@@ -794,6 +807,13 @@ pub(crate) fn move_reviewed_file(
 ) -> Result<Option<PathBuf>, String> {
     let _guard = policy::LocalOnly::enter().map_err(|e| e.to_string())?;
     let stale = "Il file è cambiato o non può essere spostato nel Cestino.";
+    use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
+    let executable = std::env::current_exe().map_err(|_| stale)?;
+    let executable_meta = std::fs::metadata(executable).map_err(|_| stale)?;
+    let eligible_location = || {
+        !path.ancestors().skip(1).any(policy::package)
+            && policy::local_provider_state(path).is_ok_and(|state| state == (true, false))
+    };
     if policy::protected(path, Mode::Space, None)
         || policy::cloud(path)
         || path.components().any(|c| {
@@ -804,12 +824,19 @@ pub(crate) fn move_reviewed_file(
         || identity.entry.kind() != libc::S_IFREG
         || identity.entry.links != 1
         || identity.entry.owner != unsafe { libc::geteuid() }
+        || identity.node() == (executable_meta.dev(), executable_meta.ino())
         || !identity.matches(path)
-        || !policy::local_path(path).unwrap_or(false)
+        || !eligible_location()
     {
         return Err(stale.into());
     }
     let handle = policy::open_file(path, 0).map_err(|_| stale)?;
+    let mut mount = MaybeUninit::<libc::statfs>::uninit();
+    if unsafe { libc::fstatfs(handle.as_raw_fd(), mount.as_mut_ptr()) } != 0
+        || unsafe { mount.assume_init() }.f_flags & libc::MNT_LOCAL as u32 == 0
+    {
+        return Err(stale.into());
+    }
     let matches_handle = || {
         handle
             .metadata()
@@ -819,7 +846,7 @@ pub(crate) fn move_reviewed_file(
         return Err(stale.into());
     }
     validate_feature(&handle)?;
-    if !matches_handle() || !identity.matches(path) || !policy::local_path(path).unwrap_or(false) {
+    if !eligible_location() || !matches_handle() || !identity.matches(path) {
         return Err(stale.into());
     }
     native_trash(path, false)

@@ -104,14 +104,6 @@ fn quarantine(p: &Path) -> Result<Option<Vec<u8>>> {
     }
     Ok(Some(value))
 }
-fn capacity(dir: &File) -> Result<u64> {
-    let mut st = std::mem::MaybeUninit::<libc::statfs>::uninit();
-    if unsafe { libc::fstatfs(dir.as_raw_fd(), st.as_mut_ptr()) } != 0 {
-        return Err(io::Error::last_os_error().to_string());
-    }
-    let st = unsafe { st.assume_init() };
-    Ok(st.f_bavail.saturating_mul(st.f_bsize as u64))
-}
 fn private_base(home: &Path) -> Result<(PathBuf, File)> {
     let mut path = home.join("Library/Application Support");
     let mut dir = policy::open_file(&path, libc::O_DIRECTORY).map_err(|e| e.to_string())?;
@@ -312,7 +304,10 @@ fn copy_variant(
 }
 fn publisher(plan: &Plan, path: &Path, stop: &AtomicBool) -> Result<()> {
     verified(path, stop)?;
-    let req=format!("identifier \"{}\" and anchor apple generic and certificate leaf[subject.OU] = \"{}\" and (certificate leaf[field.1.2.840.113635.100.6.1.13] exists or certificate leaf[field.1.2.840.113635.100.6.1.9] exists)",plan.id,plan.team);
+    let req = format!(
+        "identifier \"{}\" and anchor apple generic and certificate leaf[subject.OU] = \"{}\" and (certificate leaf[field.1.2.840.113635.100.6.1.13] exists or certificate leaf[field.1.2.840.113635.100.6.1.9] exists)",
+        plan.id, plan.team
+    );
     tool(
         "/usr/bin/codesign",
         &[
@@ -361,7 +356,9 @@ fn prepare(plan: Arc<Plan>, selection: Selection, stop: &AtomicBool) -> Result<P
     }
     trash::check_running(&plan.source, &plan.id, false)?;
     let (base, dir) = private_base(&policy::home())?;
-    if capacity(&dir)? < plan.manifest.logical.saturating_add(128 * 1024 * 1024) {
+    if policy::volume_available(&dir).map_err(|e| e.to_string())?
+        < plan.manifest.logical.saturating_add(128 * 1024 * 1024)
+    {
         return Err(
             "Spazio insufficiente per preparare una copia e conservare l’originale.".into(),
         );
@@ -396,7 +393,15 @@ fn prepare(plan: Arc<Plan>, selection: Selection, stop: &AtomicBool) -> Result<P
     let tree = Identity::tree_cancel(&dst, true, stop)
         .map_err(|e| e.to_string())?
         .0;
-    let instructions=format!("Recupero del bundle {}\n\nApp installata: {}\nCopia conservata: {}\nEditore: {}\n\nPrima dello scambio questa cartella contiene la copia ridotta. Dopo lo scambio contiene l’originale recuperabile. Lindo verifica le identità dei bundle durante ogni scambio.\nIdentità iniziale originale (volume, inode): {:?}\nIdentità iniziale copia ridotta (volume, inode): {:?}\n\nNella sessione di installazione puoi rivedere il ripristino o scegliere di spostare il backup nel Cestino. Dal Finder, Rimetti a posto riporta un backup cestinato in questa cartella.\n",plan.id,plan.source.display(),dst.display(),plan.team,plan.tree.node(),tree.node());
+    let instructions = format!(
+        "Recupero del bundle {}\n\nApp installata: {}\nCopia conservata: {}\nEditore: {}\n\nPrima dell’installazione lo staging contiene la copia ridotta. Dopo un’installazione confermata contiene l’originale. Dopo un ripristino confermato contiene la copia ridotta. Se un’operazione si interrompe, confronta volume e inode di ciascun bundle con le identità qui sotto. In Terminale digita stat -f '(%d, %i)' seguito da uno spazio, trascina il bundle dal Finder e premi Invio. Lindo verifica le identità dei bundle durante ogni scambio.\nIdentità iniziale originale (volume, inode): {:?}\nIdentità iniziale copia ridotta (volume, inode): {:?}\n\nNella sessione di installazione puoi rivedere il ripristino o scegliere di spostare il backup nel Cestino. Dal Finder, Rimetti a posto riporta un backup cestinato in questa cartella.\n",
+        plan.id,
+        plan.source.display(),
+        dst.display(),
+        plan.team,
+        plan.tree.node(),
+        tree.node()
+    );
     let mut receipt = File::options()
         .write(true)
         .create_new(true)
@@ -440,7 +445,37 @@ fn at_key(dir: &File, name: &CString) -> Result<Key> {
     }
     Ok((s.st_dev as u64, s.st_ino))
 }
-fn exchange(left: &Path, right: &Path, left_key: Key, right_key: Key) -> Result<()> {
+#[derive(Debug)]
+enum ExchangeFailure {
+    BeforeSwap(String),
+    AfterSwap(String),
+    Reverted(String),
+    TrashUnconfirmed(String),
+}
+impl From<String> for ExchangeFailure {
+    fn from(message: String) -> Self {
+        Self::BeforeSwap(message)
+    }
+}
+impl std::fmt::Display for ExchangeFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BeforeSwap(message) => {
+                write!(f, "Operazione bloccata prima della modifica. {message}")
+            }
+            Self::TrashUnconfirmed(message) => f.write_str(message),
+            Self::AfterSwap(message) => {
+                write!(f, "Scambio eseguito, esito finale incerto. {message}")
+            }
+            Self::Reverted(message) => write!(
+                f,
+                "Scambio annullato. Identità dei due percorsi ricontrollate. {message}"
+            ),
+        }
+    }
+}
+type SwapResult<T> = std::result::Result<T, ExchangeFailure>;
+fn exchange(left: &Path, right: &Path, left_key: Key, right_key: Key) -> SwapResult<()> {
     unsafe extern "C" {
         fn renameatx_np(a: i32, b: *const i8, c: i32, d: *const i8, flags: u32) -> i32;
     }
@@ -454,27 +489,40 @@ fn exchange(left: &Path, right: &Path, left_key: Key, right_key: Key) -> Result<
     let (a, n) = open(left)?;
     let (b, m) = open(right)?;
     if left_key.0 != right_key.0 || at_key(&a, &n)? != left_key || at_key(&b, &m)? != right_key {
-        return Err("Percorso o volume cambiato prima dello scambio.".into());
+        return Err(ExchangeFailure::BeforeSwap(
+            "Percorso o volume cambiato prima dello scambio.".into(),
+        ));
     }
     if unsafe { renameatx_np(a.as_raw_fd(), n.as_ptr(), b.as_raw_fd(), m.as_ptr(), 2) } != 0 {
-        return Err(io::Error::last_os_error().to_string());
+        return Err(io::Error::last_os_error().to_string().into());
     }
-    if at_key(&a, &n)? != right_key || at_key(&b, &m)? != left_key {
-        return Err(format!(
-            "Scambio non verificabile. Controlla {} e {}.",
-            left.display(),
-            right.display()
+    confirm_swapped_keys(
+        || Ok((at_key(&a, &n)?, at_key(&b, &m)?)),
+        (right_key, left_key),
+    )
+}
+fn confirm_swapped_keys(
+    observe: impl FnOnce() -> Result<(Key, Key)>,
+    expected: (Key, Key),
+) -> SwapResult<()> {
+    if observe().map_err(ExchangeFailure::AfterSwap)? != expected {
+        return Err(ExchangeFailure::AfterSwap(
+            "Identità dei percorsi non confermate.".into(),
         ));
     }
     Ok(())
 }
+
 struct Receipt {
     prepared: Arc<Prepared>,
     live: Identity,
     backup: Identity,
     free: u64,
 }
-fn checked_exchange(prepared: &Prepared, stop: &AtomicBool) -> Result<(Identity, Identity, u64)> {
+fn checked_exchange(
+    prepared: &Prepared,
+    stop: &AtomicBool,
+) -> SwapResult<(Identity, Identity, u64)> {
     let _guard = policy::LocalOnly::enter().map_err(|e| e.to_string())?;
     let p = &prepared.plan;
     let (base, dir) = private_base(&policy::home())?;
@@ -484,16 +532,20 @@ fn checked_exchange(prepared: &Prepared, stop: &AtomicBool) -> Result<(Identity,
     approved(p, &prepared.selection)?;
     let (id, team, hash) = app_reset::verified_bundle_for_trim(&p.source, stop)?;
     if (id, team, hash) != (p.id.clone(), p.team.clone(), p.cdhash.clone()) {
-        return Err("Editore o app cambiati.".into());
+        return Err(ExchangeFailure::BeforeSwap(
+            "Editore o app cambiati.".into(),
+        ));
     }
     publisher(p, &prepared.path, stop)?;
     if !matches_tree(&prepared.path, &prepared.tree, stop)?
         || !matches_tree(&p.source, &p.tree, stop)?
     {
-        return Err("Una delle copie è cambiata. Ripeti l’analisi.".into());
+        return Err(ExchangeFailure::BeforeSwap(
+            "Una delle copie è cambiata. Ripeti l’analisi.".into(),
+        ));
     }
     trash::check_running(&p.source, &p.id, false)?;
-    let free = capacity(&dir)?;
+    let free = policy::volume_available(&dir).map_err(|e| e.to_string())?;
     verify_exchange(
         &p.source,
         &prepared.path,
@@ -508,10 +560,11 @@ fn checked_exchange(prepared: &Prepared, stop: &AtomicBool) -> Result<(Identity,
                 .map_err(|e| e.to_string())?
                 .0;
             publisher(p, &p.source, stop)?;
+            publisher(p, &prepared.path, stop)?;
             if live.node() != prepared.tree.node() || backup.node() != p.tree.node() {
                 return Err("Identità dopo lo scambio non verificata.".into());
             }
-            Ok((live, backup, capacity(&dir).unwrap_or(free)))
+            Ok((live, backup, policy::volume_available(&dir).unwrap_or(free)))
         },
     )
 }
@@ -522,38 +575,57 @@ fn verify_exchange<T>(
     right_key: Key,
     closed: impl Fn() -> Result<()>,
     verify: impl FnOnce() -> Result<T>,
-) -> Result<T> {
+) -> SwapResult<T> {
     closed()?;
     exchange(left, right, left_key, right_key)?;
     match verify() {
         Ok(out) => Ok(out),
         Err(error) => {
-            if closed().is_ok() && exchange(left, right, right_key, left_key).is_ok() {
-                Err(format!(
-                    "Verifica successiva fallita. Originale rimesso al suo posto. {error}"
-                ))
-            } else {
-                Err(format!(
-                    "Controlla il bundle installato e la copia recuperabile in {}. {error}",
-                    right.display()
-                ))
+            let rollback = closed()
+                .map_err(ExchangeFailure::BeforeSwap)
+                .and_then(|()| exchange(left, right, right_key, left_key));
+            match rollback {
+                Ok(()) => Err(ExchangeFailure::Reverted(error)),
+                Err(reason) => Err(ExchangeFailure::AfterSwap(format!(
+                    "{error} Annullamento non confermato. {reason}"
+                ))),
             }
         }
     }
 }
 
-fn restore(r: &Receipt, stop: &AtomicBool) -> Result<String> {
+fn restore(r: &Receipt, stop: &AtomicBool) -> SwapResult<String> {
     let _guard = policy::LocalOnly::enter().map_err(|e| e.to_string())?;
     let p = &r.prepared;
     let (base, _) = private_base(&policy::home())?;
     let _lock = lock(&base)?;
     valid_stage(&base, &p.plan.source, &p.path)?;
     if !matches_tree(&p.plan.source, &r.live, stop)? || !matches_tree(&p.path, &r.backup, stop)? {
-        return Err("App installata o backup cambiati. Ripristino automatico bloccato.".into());
+        return Err(ExchangeFailure::BeforeSwap(
+            "App installata o backup cambiati.".into(),
+        ));
     }
     publisher(&p.plan, &p.path, stop)?;
-    trash::check_running(&p.plan.source, &p.plan.id, false)?;
-    exchange(&p.plan.source, &p.path, r.live.node(), r.backup.node())?;
+    verify_exchange(
+        &p.plan.source,
+        &p.path,
+        r.live.node(),
+        r.backup.node(),
+        || trash::check_running(&p.plan.source, &p.plan.id, false),
+        || {
+            publisher(&p.plan, &p.plan.source, stop)?;
+            publisher(&p.plan, &p.path, stop)?;
+            if Identity::read(&p.plan.source)
+                .map_err(|e| e.to_string())?
+                .node()
+                != r.backup.node()
+                || Identity::read(&p.path).map_err(|e| e.to_string())?.node() != r.live.node()
+            {
+                return Err("Identità dopo il ripristino non confermate.".into());
+            }
+            Ok(())
+        },
+    )?;
     Ok(format!(
         "Originale ripristinato. La copia ridotta è conservata in {}.",
         p.path.display()
@@ -590,29 +662,34 @@ fn trash_verified_backup(
     stop: &AtomicBool,
     validate: impl FnOnce() -> Result<()>,
     closed: impl FnOnce() -> Result<()>,
-) -> Result<TrashOutcome> {
+) -> SwapResult<TrashOutcome> {
     valid_stage(base, live, backup)?;
     if !matches_tree(live, active, stop)? || !matches_tree(backup, original, stop)? {
-        return Err("Bundle installato o backup cambiato. Spostamento bloccato.".into());
+        return Err(ExchangeFailure::BeforeSwap(
+            "Bundle installato o backup cambiato. Spostamento bloccato.".into(),
+        ));
     }
     validate()?;
     if !matches_tree(backup, original, stop)? || !matches_tree(live, active, stop)? {
-        return Err("Bundle cambiato durante la verifica.".into());
+        return Err(ExchangeFailure::BeforeSwap(
+            "Bundle cambiato durante la verifica.".into(),
+        ));
     }
     closed()?;
     let destination = objc2::rc::autoreleasepool(|_| {
-        let url = NSURL::from_directory_path(backup).ok_or("Percorso di backup non valido.")?;
+        let url = NSURL::from_directory_path(backup)
+            .ok_or_else(|| ExchangeFailure::BeforeSwap("Percorso di backup non valido.".into()))?;
         let mut destination = None;
         NSFileManager::defaultManager()
             .trashItemAtURL_resultingItemURL_error(&url, Some(&mut destination))
             .map_err(|err| {
-                format!(
+                ExchangeFailure::TrashUnconfirmed(format!(
                     "Spostamento non confermato da macOS. {} · Controlla {}",
                     err.localizedDescription(),
                     backup.display()
-                )
+                ))
             })?;
-        Ok::<_, String>(destination.and_then(|u| u.to_file_path()))
+        Ok::<_, ExchangeFailure>(destination.and_then(|u| u.to_file_path()))
     })?;
     let verified = destination.as_ref().is_some_and(|p| {
         p.components()
@@ -627,7 +704,7 @@ fn trash_verified_backup(
         verified,
     })
 }
-fn retire(r: &Receipt, stop: &AtomicBool) -> Result<String> {
+fn retire(r: &Receipt, stop: &AtomicBool) -> SwapResult<String> {
     let _guard = policy::LocalOnly::enter().map_err(|e| e.to_string())?;
     let p = &r.prepared;
     let (base, _) = private_base(&policy::home())?;
@@ -649,9 +726,14 @@ fn retire(r: &Receipt, stop: &AtomicBool) -> Result<String> {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "non comunicata da macOS".into());
     if !out.verified {
-        return Ok(format!("macOS ha accettato lo spostamento; verifica posizione e bundle nel Finder. Destinazione: {destination}."));
+        return Err(ExchangeFailure::TrashUnconfirmed(format!(
+            "macOS ha accettato lo spostamento. Ora verifica posizione e bundle nel Finder. Destinazione: {destination}."
+        )));
     }
-    Ok(format!("Backup originale nel Cestino: {destination}. Il Finder può rimetterlo nella cartella di staging. Lo spazio diventa disponibile dopo lo svuotamento del Cestino. Riduzione logica rispetto all’app iniziale: {}.",mb(p.plan.manifest.logical-p.logical)))
+    Ok(format!(
+        "Backup originale nel Cestino: {destination}. Il Finder può rimetterlo nella cartella di staging. Lo spazio diventa disponibile dopo lo svuotamento del Cestino. Riduzione logica rispetto all’app iniziale: {}.",
+        mb(p.plan.manifest.logical - p.logical)
+    ))
 }
 fn open_archive(stop: &AtomicBool) -> Result<String> {
     let base = policy::home().join("Library/Application Support/Lindo/BundleTrim");
@@ -681,6 +763,7 @@ enum Confirmation {
     Trash,
 }
 enum Update {
+    MutationFailed(ExchangeFailure),
     Plan(Arc<Plan>),
     Staged(Arc<Prepared>),
     Installed(Arc<Receipt>),
@@ -707,6 +790,25 @@ pub(crate) struct BundleTrim {
     confirm: Confirmation,
     job: Option<Job>,
     notice: String,
+    recovery: Option<String>,
+}
+fn recovery_message(p: &Prepared, reason: &str) -> String {
+    let live = &p.plan.source;
+    let stage = &p.path;
+    let key = |path: &Path| {
+        policy::open_file(path, libc::O_DIRECTORY)
+            .and_then(|f| f.metadata())
+            .ok()
+            .map(|m| (m.dev(), m.ino()))
+    };
+    let original = Some(p.plan.tree.node());
+    let reduced = Some(p.tree.node());
+    let roles = match (key(live), key(stage)) {
+        (a, b) if a == original && b == reduced => "Volume e inode corrispondono all’originale nel percorso installato e alla copia ridotta nello staging.",
+        (a, b) if a == reduced && b == original => "Volume e inode corrispondono alla copia ridotta nel percorso installato e all’originale nello staging.",
+        _ => "Il ruolo attuale dei bundle è sconosciuto.",
+    };
+    format!("{reason}\n{roles}\nPercorso installato: {}\nPercorso di staging: {}\nApri {} nel Finder e confronta le identità iniziali. Conserva entrambe le copie durante la verifica.", live.display(), stage.display(), stage.with_file_name("RECUPERO.txt").display())
 }
 fn mb(n: u64) -> String {
     format!("{:.2} MB", n as f64 / 1e6)
@@ -732,6 +834,23 @@ impl BundleTrim {
             ctx.request_repaint();
         });
     }
+    fn mutation(
+        &mut self,
+        ctx: &egui::Context,
+        f: impl FnOnce(&AtomicBool) -> SwapResult<Update> + Send + 'static,
+    ) {
+        self.work(ctx, true, move |stop| {
+            Ok(f(stop).unwrap_or_else(Update::MutationFailed))
+        });
+    }
+    fn mutation_failed(&mut self, error: ExchangeFailure) {
+        self.confirm = Confirmation::None;
+        if matches!(error, ExchangeFailure::BeforeSwap(_)) {
+            self.notice = error.to_string();
+        } else {
+            self.block_mutations(error.to_string());
+        }
+    }
     fn clear(&mut self) {
         self.plan = None;
         self.pick = Selection::default();
@@ -739,15 +858,33 @@ impl BundleTrim {
         self.installed = None;
         self.confirm = Confirmation::None;
         self.notice.clear();
+        self.recovery = None;
+    }
+    fn block_mutations(&mut self, reason: String) {
+        let Some(p) = self
+            .prepared
+            .as_ref()
+            .or_else(|| self.installed.as_ref().map(|r| &r.prepared))
+        else {
+            self.clear();
+            self.notice = reason;
+            return;
+        };
+        let recovery = recovery_message(p, &reason);
+        self.clear();
+        self.recovery = Some(recovery);
     }
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if let Some(job) = &self.job {
             match job.rx.try_recv() {
                 Ok(result) => {
+                    let mutation = job.mutation;
                     self.job = None;
                     self.confirm = Confirmation::None;
                     match result {
+                        Err(e) if mutation => self.block_mutations(e),
                         Err(e) => self.notice = e,
+                        Ok(Update::MutationFailed(error)) => self.mutation_failed(error),
                         Ok(Update::Plan(p)) => {
                             self.pick = Selection::default();
                             self.plan = Some(p);
@@ -770,14 +907,33 @@ impl BundleTrim {
                     return;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
+                    let mutation = job.mutation;
                     self.job = None;
                     self.confirm = Confirmation::None;
-                    self.notice = "Verifica interrotta. Controlla lo staging.".into();
+                    if mutation {
+                        self.block_mutations("Operazione interrotta.".into());
+                    } else {
+                        self.notice = "Verifica interrotta.".into();
+                    }
                 }
             }
         }
         if !self.notice.is_empty() {
             ui.label(&self.notice);
+        }
+        if let Some(message) = &self.recovery {
+            ui.heading("Controlla i bundle nel Finder");
+            ui.label(message);
+            if ui
+                .button("Mostra archivio delle copie nel Finder")
+                .clicked()
+            {
+                self.work(ctx, false, |stop| open_archive(stop).map(Update::Message));
+            }
+            if ui.button("Chiudi il recupero").clicked() {
+                self.clear();
+            }
+            return;
         }
         if let Some(r) = self.installed.clone() {
             ui.heading("Copia verificata installata");
@@ -795,7 +951,7 @@ impl BundleTrim {
                         "Ripristinare l’originale e conservare la copia ridotta nello staging?",
                     );
                     if ui.button("Conferma ripristino originale").clicked() {
-                        self.work(ctx, true, move |stop| restore(&r, stop).map(Update::Closed));
+                        self.mutation(ctx, move |stop| restore(&r, stop).map(Update::Closed));
                     }
                     if ui.button("Indietro").clicked() {
                         self.confirm = Confirmation::None;
@@ -804,7 +960,7 @@ impl BundleTrim {
                 Confirmation::Trash => {
                     ui.label(format!("Spostare nel Cestino il solo originale di {}? Percorso: {}. Il bundle ridotto resta installato. Per recuperare l’originale usa Rimetti a posto nel Finder.",mb(r.prepared.plan.manifest.logical),r.prepared.path.display()));
                     if ui.button("Conferma spostamento del backup").clicked() {
-                        self.work(ctx, true, move |stop| retire(&r, stop).map(Update::Closed));
+                        self.mutation(ctx, move |stop| retire(&r, stop).map(Update::Closed));
                     }
                     if ui.button("Indietro").clicked() {
                         self.confirm = Confirmation::None;
@@ -847,7 +1003,7 @@ impl BundleTrim {
                     "Scambiare la copia verificata con l’app originale? Mantieni l’app chiusa.",
                 );
                 if ui.button("Conferma installazione della copia").clicked() {
-                    self.work(ctx, true, move |stop| {
+                    self.mutation(ctx, move |stop| {
                         let (live, backup, free) = checked_exchange(&p, stop)?;
                         Ok(Update::Installed(Arc::new(Receipt {
                             prepared: p,
@@ -1026,6 +1182,155 @@ mod tests {
         app
     }
     #[test]
+    fn post_swap_observation_errors_cannot_be_classified_as_preflight() {
+        let expected = ((1, 2), (1, 3));
+        for observed in [
+            Err("observation failed".into()),
+            Ok((expected.1, expected.0)),
+        ] {
+            assert!(matches!(
+                confirm_swapped_keys(|| observed, expected),
+                Err(ExchangeFailure::AfterSwap(_))
+            ));
+        }
+    }
+    fn exchange_fixture() -> (tempfile::TempDir, Arc<Prepared>) {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let live = base.join("Installed.app");
+        let stage = base.join("Staged.app");
+        fs::create_dir(&live).unwrap();
+        fs::create_dir(&stage).unwrap();
+        let stop = AtomicBool::new(false);
+        let original = Identity::read(&live).unwrap();
+        let reduced = Identity::read(&stage).unwrap();
+        let plan = Arc::new(Plan {
+            source: live.clone(),
+            id: String::new(),
+            team: String::new(),
+            cdhash: String::new(),
+            manifest: files::manifest(&live, &stop).unwrap(),
+            tree: original.clone(),
+            locales: vec![],
+            dev: String::new(),
+            quarantine: None,
+            developer_id: false,
+        });
+        let prepared = Arc::new(Prepared {
+            plan,
+            selection: Selection::default(),
+            path: stage.clone(),
+            tree: reduced.clone(),
+            logical: 0,
+            allocated: 0,
+        });
+        (temp, prepared)
+    }
+    #[test]
+    fn restore_preflight_keeps_receipt_and_revalidates_on_retry() {
+        let (_temp, prepared) = exchange_fixture();
+        let live = &prepared.plan.source;
+        let stage = &prepared.path;
+        let original = prepared.plan.tree.node();
+        let reduced = prepared.tree.node();
+        exchange(live, stage, original, reduced).unwrap();
+        let stop = AtomicBool::new(false);
+        let receipt = Arc::new(Receipt {
+            prepared: prepared.clone(),
+            live: Identity::tree_cancel(live, true, &stop).unwrap().0,
+            backup: Identity::tree_cancel(stage, true, &stop).unwrap().0,
+            free: 0,
+        });
+        let mut ui = BundleTrim {
+            installed: Some(receipt.clone()),
+            confirm: Confirmation::Restore,
+            ..Default::default()
+        };
+        let attempt = |running: bool| {
+            assert!(matches_tree(live, &receipt.live, &stop).unwrap());
+            assert!(matches_tree(stage, &receipt.backup, &stop).unwrap());
+            verify_exchange(
+                live,
+                stage,
+                reduced,
+                original,
+                || {
+                    if running {
+                        Err("app running".into())
+                    } else {
+                        Ok(())
+                    }
+                },
+                || Ok(()),
+            )
+        };
+        ui.mutation_failed(attempt(true).unwrap_err());
+        assert!(Arc::ptr_eq(ui.installed.as_ref().unwrap(), &receipt));
+        assert!(ui.recovery.is_none() && ui.confirm == Confirmation::None);
+        assert!(ui.notice.contains("app running"));
+        attempt(false).unwrap();
+        assert_eq!(Identity::read(live).unwrap().node(), original);
+        assert_eq!(Identity::read(stage).unwrap().node(), reduced);
+    }
+    #[test]
+    fn blocked_rollback_clears_actions_and_reports_current_roles() {
+        let (_temp, prepared) = exchange_fixture();
+        let live = prepared.plan.source.clone();
+        let stage = prepared.path.clone();
+        let base = stage.parent().unwrap();
+        let original = prepared.plan.tree.clone();
+        let reduced = prepared.tree.clone();
+        let closed_once = std::cell::Cell::new(true);
+        let error = verify_exchange(
+            &live,
+            &stage,
+            original.node(),
+            reduced.node(),
+            || {
+                if closed_once.replace(false) {
+                    Ok(())
+                } else {
+                    Err("rollback blocked".into())
+                }
+            },
+            || Err::<(), _>("verification failed".into()),
+        )
+        .unwrap_err();
+        assert!(matches!(error, ExchangeFailure::AfterSwap(_)));
+        let mut ui = BundleTrim {
+            prepared: Some(prepared.clone()),
+            confirm: Confirmation::Install,
+            ..Default::default()
+        };
+        ui.mutation_failed(error);
+        assert!(
+            ui.prepared.is_none() && ui.installed.is_none() && ui.confirm == Confirmation::None
+        );
+        let report = ui.recovery.unwrap();
+        assert!(report.contains("originale nello staging") && report.contains("RECUPERO.txt"));
+        assert!(
+            report.contains(live.to_str().unwrap()) && report.contains(stage.to_str().unwrap())
+        );
+
+        fs::rename(&stage, base.join("displaced")).unwrap();
+        fs::create_dir(&stage).unwrap();
+        let mut ui = BundleTrim {
+            installed: Some(Arc::new(Receipt {
+                prepared,
+                live: reduced,
+                backup: original,
+                free: 0,
+            })),
+            confirm: Confirmation::Restore,
+            ..Default::default()
+        };
+        ui.block_mutations("restore interrupted".into());
+        assert!(
+            ui.prepared.is_none() && ui.installed.is_none() && ui.confirm == Confirmation::None
+        );
+        assert!(ui.recovery.unwrap().contains("sconosciuto"));
+    }
+    #[test]
     fn universal_fixture_preserves_signed_arm_code_and_exchanges_atomically() {
         let tmp = tempfile::Builder::new()
             .prefix("lindo-bundle-trim-")
@@ -1059,8 +1364,7 @@ mod tests {
             || Ok(()),
             || Err::<(), _>("synthetic check failed".into())
         )
-        .unwrap_err()
-        .contains("rimesso"));
+        .is_err_and(|e| matches!(e, ExchangeFailure::Reverted(_))));
         assert_eq!(Identity::read(&src).unwrap().node(), source_key);
         verify_exchange(
             &src,
@@ -1187,7 +1491,7 @@ mod trash_tests {
             || Ok(()),
             || Ok(())
         )
-        .is_err());
+        .is_err_and(|e| matches!(e, ExchangeFailure::BeforeSwap(_))));
         assert!(trash_verified_backup(
             &base,
             (&live, &live_id),
@@ -1196,7 +1500,7 @@ mod trash_tests {
             || Ok(()),
             || Err("synthetic active".into())
         )
-        .is_err());
+        .is_err_and(|e| matches!(e, ExchangeFailure::BeforeSwap(_))));
         let outcome = trash_verified_backup(
             &base,
             (&live, &live_id),

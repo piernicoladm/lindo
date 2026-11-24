@@ -348,6 +348,43 @@ impl Page {
     }
 }
 
+#[derive(Clone, Default)]
+struct AllocationEstimate {
+    bytes: u64,
+    incomplete: bool,
+    linked_names: usize,
+}
+impl AllocationEstimate {
+    fn selected<'a>(items: impl Iterator<Item = &'a crate::model::Item>) -> Self {
+        let mut estimate = Self::default();
+        let mut groups = HashMap::new();
+        for item in items {
+            let Some((links, bytes)) = item.identity.file_allocation() else {
+                estimate.incomplete = true;
+                continue;
+            };
+            if links == 1 {
+                estimate.bytes = estimate.bytes.saturating_add(bytes);
+                continue;
+            }
+            estimate.linked_names += 1;
+            let (names, expected, allocated) = groups
+                .entry(item.identity.node())
+                .or_insert((0usize, links, bytes));
+            *names += 1;
+            if (*expected, *allocated) != (links, bytes) {
+                estimate.incomplete = true;
+            }
+        }
+        for (names, expected, allocated) in groups.into_values() {
+            if names == usize::from(expected) {
+                estimate.bytes = estimate.bytes.saturating_add(allocated);
+            }
+        }
+        estimate
+    }
+}
+
 #[derive(Clone)]
 struct Review {
     label: String,
@@ -357,6 +394,7 @@ struct Review {
     rows: Vec<(usize, bool)>,
     keepers: HashMap<u64, usize>,
     total: u64,
+    allocation: AllocationEstimate,
     cloud: bool,
 }
 
@@ -379,6 +417,7 @@ impl Review {
         {
             return None;
         }
+        let allocation = AllocationEstimate::selected(items.iter());
         let count = items.len();
         let total = items
             .iter()
@@ -418,6 +457,7 @@ impl Review {
             rows,
             keepers,
             total,
+            allocation,
             cloud,
         })
     }
@@ -461,6 +501,7 @@ impl Review {
         } else {
             rows.extend(moves.iter().copied().map(|i| (i, false)));
         }
+        let allocation = AllocationEstimate::selected(moves.iter().map(|&i| &data.report.items[i]));
         Some(Self {
             label: title(page.req.mode).into(),
             req: page.req.clone(),
@@ -472,6 +513,7 @@ impl Review {
                 .filter_map(|g| page.keeper(g).map(|i| (g, i)))
                 .collect(),
             total,
+            allocation,
             cloud,
         })
     }
@@ -562,7 +604,7 @@ struct Lindo {
     remote: crate::remote::Remote,
     accounts: crate::accounts::Accounts,
     desktop: crate::desktop::Desktop,
-    baselines: HashMap<PathBuf, u64>,
+    baselines: HashMap<PathBuf, crate::model::FolderMeasurement>,
     tool_query: String,
     favorites: HashSet<String>,
     clutter: crate::clutter::Clutter,
@@ -1433,6 +1475,47 @@ mod tests {
         assert_eq!(page.req.roots, [PathBuf::from("/b"), PathBuf::from("/a")]);
         page.choose_root("/c".into(), false);
         assert_eq!(page.req.roots, [PathBuf::from("/c")]);
+    }
+
+    #[test]
+    fn review_counts_allocated_blocks_once_when_all_hard_link_names_are_selected() {
+        use std::os::unix::fs::MetadataExt;
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().canonicalize().unwrap();
+        let file = root.join("ordinary");
+        let linked = root.join("linked");
+        let other = root.join("other-name");
+        std::fs::write(&file, vec![41; 8193]).unwrap();
+        std::fs::write(&linked, vec![17; 4101]).unwrap();
+        std::fs::hard_link(&linked, &other).unwrap();
+        let normal_blocks = std::fs::metadata(&file).unwrap().blocks() * 512;
+        let shared_blocks = std::fs::metadata(&linked).unwrap().blocks() * 512;
+        let proposal = |paths: &[&Path]| crate::extras::Proposal {
+            request: initial_request(Mode::Large),
+            label: "Test".into(),
+            items: paths
+                .iter()
+                .map(|p| Item {
+                    path: p.to_path_buf(),
+                    identity: Identity::read(p).unwrap(),
+                    bytes: p.metadata().unwrap().len(),
+                    group: None,
+                    cloud: false,
+                })
+                .collect(),
+            retained: vec![],
+        };
+        let partial = Review::from_proposal(proposal(&[&file, &linked])).unwrap();
+        assert_eq!(partial.allocation.bytes, normal_blocks);
+        assert_eq!(partial.allocation.linked_names, 1);
+        assert_eq!(partial.total, 8193 + 4101);
+        assert!(!partial.allocation.incomplete);
+        let full = Review::from_proposal(proposal(&[&file, &linked, &other])).unwrap();
+        assert_eq!(full.allocation.bytes, normal_blocks + shared_blocks);
+        assert_eq!(full.allocation.linked_names, 2);
+        assert_eq!(full.total, 8193 + 4101 * 2);
+        let mixed = Review::from_proposal(proposal(&[&file, &root])).unwrap();
+        assert!(mixed.allocation.incomplete);
     }
 
     #[test]
