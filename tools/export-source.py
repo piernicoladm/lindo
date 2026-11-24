@@ -18,6 +18,12 @@ TOOLS = ('selftest.sh', 'test-release-safety.sh', 'scale-ui.py', 'install-notari
          'notarize.sh', 'export-source.py', 'test-export.py')
 BUNDLE_ICON = 'launch/brand/assets/AppIcon.icns'
 ICON_SHA256 = '7223e2013d2ff00e6f67fd8e80d7acd02ca2cba622daf30215cd3a551d4baf87'
+REVIEWED_BINARIES = {
+    BUNDLE_ICON: ICON_SHA256,
+    'src/artwork/home.png': '83ff37d29d82bcf00db2ac8937e2e9b29b1371d6a23d6568cf849e956371bdd8',
+    'src/artwork/logo.png': '71e73f57727eb31c8b47d083c4a5f81ceb2ba6671e18751877af5fbabf0eb332',
+    'src/artwork/scan.png': '5a34240dc6a6ca989d6887b9df22b78495352a1ee9afe8b04f37cbb34c0b487e',
+}
 ICONS = ('Mark.svg', 'AppIcon.icon/icon.json', 'AppIcon.icon/Assets/back.svg',
          'AppIcon.icon/Assets/front.svg')
 PUBLIC_DOCS = ('README.md', 'BUILD.md', 'SECURITY.md', 'CONTRIBUTING.md', 'FEATURES.md')
@@ -53,7 +59,7 @@ def inspect_text(name: str, data: bytes) -> None:
 
 def source_files(root: Path) -> dict[str, Path]:
     files = {name: root / name for name in ROOT_FILES}
-    files[BUNDLE_ICON] = root / BUNDLE_ICON
+    files.update({name: root / name for name in REVIEWED_BINARIES})
     for folder in ('src',):
         if not (root / folder).is_dir():
             raise ExportError(f'Missing source directory: {folder}')
@@ -86,9 +92,9 @@ def collect(root: Path) -> dict[str, tuple[bytes, int]]:
         if not source.is_file():
             raise ExportError(f'Missing regular source file: {name}')
         data = source.read_bytes()
-        if name == BUNDLE_ICON:
-            if hashlib.sha256(data).hexdigest() != ICON_SHA256:
-                raise ExportError(f'Unreviewed bundled icon: {name}')
+        if name in REVIEWED_BINARIES:
+            if hashlib.sha256(data).hexdigest() != REVIEWED_BINARIES[name]:
+                raise ExportError(f'Unreviewed bundled artwork: {name}')
         else:
             inspect_text(name, data)
         mode = 0o755 if source.stat().st_mode & 0o111 else 0o644

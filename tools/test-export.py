@@ -24,9 +24,10 @@ class SourceExportTests(unittest.TestCase):
         for folder in ('src',):
             (self.repo / folder).mkdir(parents=True)
             (self.repo / folder / 'example.rs').write_text('// synthetic source\n')
-        icon = self.repo / module.BUNDLE_ICON
-        icon.parent.mkdir(parents=True)
-        icon.write_bytes((Path(__file__).resolve().parents[1] / module.BUNDLE_ICON).read_bytes())
+        for name in module.REVIEWED_BINARIES:
+            artwork = self.repo / name
+            artwork.parent.mkdir(parents=True, exist_ok=True)
+            artwork.write_bytes((Path(__file__).resolve().parents[1] / name).read_bytes())
         for name in module.TOOLS:
             path = self.repo / 'tools' / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +59,13 @@ class SourceExportTests(unittest.TestCase):
         for path in output.rglob('*'):
             if path.is_file():
                 self.assertNotIn(b'PRIVATE SENTINEL', path.read_bytes())
+
+    def test_modified_artwork_is_rejected_before_export(self):
+        path = self.repo / 'src/artwork/home.png'
+        path.write_bytes(path.read_bytes() + b'unreviewed')
+        with self.assertRaisesRegex(module.ExportError, 'src/artwork/home.png'):
+            module.export(self.repo, self.base / 'export')
+        self.assertFalse((self.base / 'export').exists())
 
     def test_deterministic_zip_and_manifest(self):
         tool = self.repo / 'build.sh'
