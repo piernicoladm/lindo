@@ -161,7 +161,7 @@ impl Lindo {
                 if shortcut {
                     query.request_focus();
                 }
-                if query.changed() || shortcut {
+                if browsing && (query.clicked() || query.changed() || shortcut) {
                     if !self.searching {
                         self.search_origin = Some((self.destination, self.mode, self.extra));
                     }
@@ -185,5 +185,114 @@ impl Lindo {
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clicking_search_field_or_glass_opens_catalog_and_restores_origin() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        design::configure(&ctx);
+        let mut app = Lindo::new(&ctx);
+        app.destination = Destination::Cleanup;
+        app.mode = Some(Mode::Duplicates);
+        let draw = |app: &mut Lindo, events| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(660., 460.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    app.sidebar(ctx, true);
+                    egui::CentralPanel::default().show(ctx, |ui| app.toolbar(ui, true));
+                },
+            )
+            .platform_output
+            .accesskit_update
+            .unwrap()
+        };
+        let _ = draw(&mut app, vec![]);
+        let tree = draw(&mut app, vec![]);
+        let field = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == egui::accesskit::Role::TextInput)
+            .and_then(|(_, node)| node.bounds())
+            .expect("global search input");
+        for x in [field.x0 + 12., (field.x0 + field.x1) * 0.5] {
+            let pos = egui::pos2(x as f32, ((field.y0 + field.y1) * 0.5) as f32);
+            for pressed in [true, false] {
+                let _ = draw(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+            assert!(
+                app.searching,
+                "Clicking the glass or text field should immediately open search"
+            );
+            assert_eq!(app.mode, None);
+            let _ = draw(&mut app, vec![egui::Event::Text("log".into())]);
+            assert_eq!(app.tool_query, "log");
+            let _ = draw(
+                &mut app,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            assert!(!app.searching && app.tool_query.is_empty());
+            assert_eq!(app.destination, Destination::Cleanup);
+            assert_eq!(app.mode, Some(Mode::Duplicates));
+        }
+
+        for destination in [Destination::Cleanup, Destination::Tools] {
+            let tree = draw(&mut app, vec![]);
+            let bounds = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(destination.label()))
+                .and_then(|(_, node)| node.bounds())
+                .expect("visible sidebar destination");
+            let pos = egui::pos2(
+                (bounds.x1 - 3.) as f32,
+                ((bounds.y0 + bounds.y1) * 0.5) as f32,
+            );
+            for pressed in [true, false] {
+                let _ = draw(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            pressed,
+                            button: egui::PointerButton::Primary,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+            assert_eq!(app.destination, destination);
+            assert!(app.mode.is_none() && app.extra.is_none());
+        }
     }
 }
