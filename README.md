@@ -1,6 +1,28 @@
 # Lindo
 
-Lindo 0.9.2 è una utility macOS scritta in Rust per individuare cosa occupa spazio e scegliere quali file conservare. Richiede macOS 26 e Apple Silicon. La panoramica scura mostra lo spazio disponibile e le dimensioni dei file da rivedere. Durante la scansione puoi vedere la cartella in esame e interrompere il lavoro. In Duplicati scegli la copia da conservare e controlli entrambi i percorsi prima dello spostamento nel Cestino. Un clic su Cerca apre gli strumenti. Puoi aprire uno strumento cliccando il titolo, la descrizione o lo spazio libero sulla sua riga. La stella lo aggiunge ai preferiti.
+Lindo mostra quali file e cartelle occupano più spazio sul Mac e trova i duplicati esatti confrontando i file byte per byte. La scansione avviene sul Mac, nelle cartelle che scegli. Per ogni gruppo di duplicati puoi confrontare i percorsi, scegliere la copia da conservare e rivedere le altre prima di spostarle nel Cestino.
+
+Lindo 0.9.2 richiede **macOS 26 o successivo su Apple Silicon**. Il codice è scritto in Rust e distribuito con [licenza MIT](LICENSE).
+
+## Avvio rapido dal sorgente
+
+Installa la toolchain stabile di Rust con Cargo e gli strumenti da riga di comando di Xcode. Poi apri il Terminale ed esegui questi comandi.
+
+```sh
+git clone https://github.com/piernicoladm/lindo.git
+cd lindo
+./build.sh --open
+```
+
+Puoi anche scaricare il sorgente da GitHub con **Code → Download ZIP**, estrarlo ed eseguire `./build.sh --open` nella cartella estratta. Alla prima compilazione Cargo scarica le dipendenze elencate in `Cargo.lock`.
+
+Lo script apre la copia compilata in `~/Library/Developer/Lindo/staging/` e stampa il percorso della `.app`. Questa build locale usa una firma ad hoc ed è priva di notarizzazione Apple. Per installazione, test e firma consulta [BUILD.md](BUILD.md).
+
+### Prima scansione
+
+1. Apri **Mappa dello spazio** e scegli una cartella. Nella mappa proporzionale, i riquadri più grandi indicano gli elementi che occupano più spazio. Fai clic su una cartella per esplorarla.
+2. Per confrontare copie anche in cartelle diverse, apri **Duplicati** e seleziona le cartelle da esaminare. Puoi interrompere la scansione mentre è in corso.
+3. Apri un gruppo di risultati e scegli la copia da conservare. Controlla i percorsi delle copie selezionate prima di confermare lo spostamento nel Cestino.
 
 ## Funzioni
 
@@ -13,22 +35,6 @@ Lindo 0.9.2 è una utility macOS scritta in Rust per individuare cosa occupa spa
 - Cerca malware con ClamAV o sorveglia una cartella mentre l’app è aperta, aggiorna le firme e rivedi le rilevazioni prima del Cestino. Monitora il disco dalla barra dei menu mentre Lindo è aperta.
 
 Il dettaglio dei provider, dei limiti e delle verifiche è in [FEATURES.md](FEATURES.md).
-
-## Provala dal sorgente
-
-Servono un Mac Apple Silicon, macOS 26, Rust con Cargo e gli Apple Command Line Tools. Cargo scarica le dipendenze bloccate in Cargo.lock alla prima compilazione.
-
-```sh
-git clone https://github.com/piernicoladm/lindo.git
-cd lindo
-./build.sh --open
-```
-
-Puoi anche scegliere **Code → Download ZIP** nella pagina del repository, estrarre l'archivio e aprire il terminale nella cartella estratta prima di eseguire `./build.sh --open`.
-
-Il comando prepara una build locale ad hoc e apre la copia in staging. Non sostituisce un'installazione esistente. La posizione della `.app` viene stampata nel terminale; i prodotti di build restano in `~/Library/Developer/Lindo/`.
-
-Questa distribuzione contiene il sorgente. Una build locale non è una release notarizzata da Apple. Per compilazione, test, installazione e firma leggi [BUILD.md](BUILD.md).
 
 ## Prima di rimuovere qualcosa
 
