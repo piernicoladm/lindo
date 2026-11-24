@@ -84,6 +84,28 @@ struct Report {
     packages: Vec<Mutation>,
     findings: Vec<security_scan::Finding>,
 }
+pub(crate) fn scan_assessment(
+    check: crate::assessment::Check,
+    cancel: &AtomicBool,
+) -> Result<(String, usize), String> {
+    use crate::assessment::Check;
+    let action = match check {
+        Check::Performance => Action::Performance,
+        Check::Protection => Action::Protection,
+        Check::Clam(path) => {
+            let _guard = crate::policy::LocalOnly::enter().map_err(|e| e.to_string())?;
+            if !security_scan::permitted(&path) {
+                return Err("Scegli una cartella locale consentita.".into());
+            }
+            let _directory = security_scan::local_handle(&path, true)?;
+            return execute(Action::Scan(path), cancel)
+                .map(|report| (report.text, report.findings.len()));
+        }
+    };
+    let report = execute(action, cancel)?;
+    Ok((report.text, report.findings.len()))
+}
+
 fn execute(action: Action, cancel: &AtomicBool) -> Result<Report, String> {
     let mut report = Report {
         opened: false,

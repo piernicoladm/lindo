@@ -1,5 +1,6 @@
 mod accounts;
 mod app_reset;
+mod assessment;
 mod clutter;
 mod desktop;
 mod extras;

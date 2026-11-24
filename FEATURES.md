@@ -2,7 +2,7 @@
 
 | Esigenza | Come usarla in Lindo | Ambito |
 | --- | --- | --- |
-| Analisi rapida | Panoramica, Analizza queste tre aree | Mappa, cache browser e log. Mostra percorsi, avanzamento, esclusioni ed errori. |
+| Analisi rapida e completa | Panoramica | Il controllo rapido copre mappa, cache browser e log. L’analisi completa include le sei aree disco, risorse e protezioni di macOS, con scansione ClamAV opzionale di una cartella esplicita. Mostra copertura, risultati ed errori. |
 | Spazio su disco | Mappa dello spazio, Mappa proporzionale | Le aree rappresentano byte allocati. Clic su una cartella per approfondire. Misura di riferimento per cartella nella sessione. |
 | File grandi, vecchi e download | File grandi oppure Download e immagini | Filtri per tipo, dimensione e data di modifica. Il Cestino richiede revisione. |
 | Duplicati e foto simili | Duplicati oppure Download e immagini, Immagini simili | I duplicati sono confrontati byte per byte anche tra cartelle o volumi scelti insieme. La somiglianza percettiva è disponibile per JPEG, PNG, HEIC e HEIF. La copia di riferimento viene ricontrollata. |
@@ -23,7 +23,7 @@
 
 ## Copertura e differenze
 
-Lindo usa le API di macOS, i provider configurati e strumenti installabili. L’analisi rapida comprende tre aree. Le altre scansioni sono avviate dalla sezione scelta. L’antivirus usa le firme ClamAV. Il monitor osserva le scritture nella cartella scelta. Un file creato e rimosso fra due osservazioni può sfuggire. La gestione Mail richiede un account configurato in Apple Mail. Restano fuori dalla copertura il confronto di RAW e librerie Foto, la rimozione di lingue o architetture interne dai bundle firmati, il blocco preventivo dell’esecuzione sull’intero Mac e la classificazione cloud proprietaria di MacPaw. I modelli e i residui non attribuibili con precisione si possono ispezionare. Lo spazio recuperato effettivo dipende da APFS, Cestino e criteri di conservazione dei servizi.
+Lindo usa le API di macOS, i provider configurati e strumenti installabili. L’antivirus usa le firme ClamAV. Il monitor osserva le scritture nella cartella scelta. Un file creato e rimosso fra due osservazioni può sfuggire. La gestione Mail richiede un account configurato in Apple Mail. Restano fuori dalla copertura il confronto di RAW e librerie Foto, la rimozione di lingue o architetture interne dai bundle firmati, il blocco preventivo dell’esecuzione sull’intero Mac e la classificazione cloud proprietaria di MacPaw. I modelli e i residui non attribuibili con precisione si possono ispezionare. Lo spazio recuperato effettivo dipende da APFS, Cestino e criteri di conservazione dei servizi.
 
 Le verifiche usano fixture sintetiche. La finestra, le operazioni recuperabili tramite il Cestino, le firme ClamAV, le immagini HEIC e rclone locale hanno prove su macOS. Le mutazioni amministrative, gli account cloud, Mail e Chrome usano simulazioni o controlli di interfaccia. Il blocco globale della tastiera ha una prova simulata. Per la validazione su dispositivi e account reali servono autorizzazioni e dati di prova propri.
 

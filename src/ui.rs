@@ -508,6 +508,7 @@ const EXTRAS: [(Extra, &str); 9] = [
 
 struct Lindo {
     extra: Option<Extra>,
+    assessment: crate::assessment::Assessment,
     reset: crate::app_reset::AppReset,
     versions: crate::file_versions::FileVersions,
     legacy: crate::legacy_junk::LegacyJunk,
@@ -521,7 +522,7 @@ struct Lindo {
     clutter: crate::clutter::Clutter,
     junk: crate::junk::Junk,
     system: crate::system_tools::SystemTools,
-    quick: std::collections::VecDeque<Mode>,
+    quick: std::collections::VecDeque<Request>,
     pages: HashMap<Mode, Page>,
     mode: Option<Mode>,
     tx: mpsc::Sender<Event>,
@@ -597,6 +598,7 @@ impl Lindo {
             accounts: Default::default(),
             desktop: Default::default(),
             baselines: Default::default(),
+            assessment: Default::default(),
             extra: None,
             clutter: Default::default(),
             junk: Default::default(),
@@ -629,6 +631,7 @@ impl Lindo {
                     self.workers = self.workers.saturating_sub(1);
                     if self.active.as_ref().is_some_and(|a| a.id == id) {
                         self.active = None;
+                        self.assessment.record_core(mode, &result.report);
                         self.status = format!("Analisi completata · {}", title(mode));
                         self.pages.get_mut(&mode).unwrap().install(result);
                     }
@@ -731,6 +734,7 @@ impl Lindo {
         });
     }
     fn cancel(&mut self) {
+        self.assessment.cancel();
         self.quick.clear();
         if let Some(activity) = self.active.take() {
             activity.stop.store(true, Ordering::Release);
@@ -880,8 +884,28 @@ impl Lindo {
             )
             .clicked()
         {
-            self.quick.extend(quick_modes);
+            self.quick
+                .extend(quick_modes.map(|mode| self.pages[&mode].req.clone()));
             ctx.request_repaint();
+        }
+        self.assessment
+            .set_core_busy(!self.available() || !self.quick.is_empty());
+        let requests: Vec<_> = MODES
+            .iter()
+            .map(|mode| {
+                let mut req = self.pages[mode].req.clone();
+                if req.roots.is_empty() && matches!(mode, Mode::Large | Mode::Duplicates) {
+                    req.roots.extend(home().map(|h| h.join("Downloads")));
+                }
+                req
+            })
+            .collect();
+        if self.assessment.show(ui, ctx, &requests) {
+            self.quick.extend(requests);
+            ctx.request_repaint();
+        }
+        if self.assessment.take_cancel_request() {
+            self.cancel();
         }
         ui.separator();
         ui.horizontal_wrapped(|ui| {
@@ -1569,7 +1593,9 @@ impl eframe::App for Lindo {
         self.desktop.refresh(ctx, self.disk);
         self.picker.poll();
         if self.review.is_none() && self.available() {
-            if let Some(mode) = self.quick.pop_front() {
+            if let Some(req) = self.quick.pop_front() {
+                let mode = req.mode;
+                self.pages.get_mut(&mode).unwrap().req = req;
                 self.launch_scan(mode, ctx);
             }
         }
