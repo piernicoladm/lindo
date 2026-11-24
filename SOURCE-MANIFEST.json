@@ -271,10 +271,10 @@
       "sha256": "be02a9e4183a76a0f027b23e9f4614358d7f459ff4c34f868efef7a11ee636f6"
     },
     {
-      "bytes": 19157,
+      "bytes": 19108,
       "mode": "0644",
       "path": "src/policy.rs",
-      "sha256": "1d1541f5ae8a82226ef11adea5c00ab3e40761116a15da392f5fddffbb8b61d9"
+      "sha256": "66cbcf1e043bbc6194fa3e6a41091557e7bc121c574b1bc4733df60b0c59af2c"
     },
     {
       "bytes": 39241,

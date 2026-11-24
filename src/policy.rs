@@ -522,10 +522,7 @@ mod location_tests {
             "Google Drive/file",
             "GoogleDrive-Team/file",
         ] {
-            assert!(cloud_under_home(
-                &Path::new("/users/fixture").join(rel),
-                home
-            ));
+            assert!(cloud_under_home(&Path::new("/users/demo").join(rel), home));
         }
         for path in [
             "/Users/demo/Library/CloudStorage Backup/x",
