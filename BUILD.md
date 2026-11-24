@@ -1,9 +1,10 @@
 # Compilazione e verifica
 
-Lindo richiede macOS 26, Apple Silicon e Swift 6.2 o successivo. Non scarica librerie di terze parti. Apple Command Line Tools è sufficiente per lo sviluppo locale; la CI usa Xcode.
+Lindo richiede macOS 26, Apple Silicon e la toolchain stabile Rust con Cargo. Cargo usa le dipendenze registrate in Cargo.lock. Apple Command Line Tools è sufficiente per lo sviluppo locale; la CI usa Xcode.
 
 ```sh
-swift --version
+rustc --version
+cargo --version
 ./build.sh
 ./build.sh --debug --open
 ```
@@ -15,19 +16,18 @@ Per sostituire esplicitamente `~/Applications/Lindo.app`, chiudi Lindo e usa `./
 ## Test
 
 ```sh
-./tools/selftest.sh
+./tools/selftest.sh --all-features
 ./tools/test-release-safety.sh
-./tools/grid-lint.sh
+cargo fmt --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
 python3 tools/test-export.py
 ```
 
-`selftest.sh` esegue Swift Testing e i controlli dell'app in modalità sample. I test di Cestino reale sono disabilitati per impostazione predefinita. `test-release-safety.sh` sostituisce firma, installazione e servizi Apple con stub su fixture sintetiche. Non usa certificati o credenziali.
+`selftest.sh` esegue le regressioni Rust su fixture. Il comando `Lindo --selftest` esegue una scansione sintetica dal binario del bundle. I controlli di rilascio sostituiscono firma, installazione e servizi Apple con stub.
 
-`LINDO_SCALE_TEST=1 ./tools/selftest.sh` abilita le prove di scala. `LINDO_REAL_TRASH_TEST=1 ./tools/selftest.sh` abilita soltanto i roundtrip Cestino/ripristino su fixture create dai test. Non usare cartelle personali come fixture.
+Per verificare la finestra su 120.000 file in sottocartelle, 15.000 file nella stessa cartella e 3.600 duplicati, compila con `cargo build --locked --release --features ui-probe` e passa il binario e una directory locale di test esistente a `python3 tools/scale-ui.py`. La directory deve essere nel tuo utente e fuori da Library o Dropbox. La prova crea e rimuove le proprie fixture e richiede una sessione grafica macOS.
 
-`./tools/snap.sh` produce schermate con dati di esempio in `/tmp/Lindo-shots`; una sessione grafica attiva è necessaria. La CI non considera un test del modello equivalente a una verifica visiva o di accessibilità.
-
-`python3 tools/stability-test.py --iterations 20 --output /tmp/lindo-stability` ripete le regressioni di concorrenza, cancellazione e sicurezza su fixture, fermandosi al primo errore e conservando report JSON e log. Il driver richiede Swift 6.2 o successivo, rifiuta esecuzioni prive di test e mantiene disabilitate le prove di Cestino reale. La CI esegue queste ripetizioni e, su Xcode 26.0.1, acquisisce snapshot sample e controlla la geometria dei layout. Le immagini restano disponibili per ispezione, senza equivalere a una prova d'interazione nativa.
+Per una verifica di aspetto senza cambiare le impostazioni del Mac, il binario del bundle accetta `-AppleInterfaceStyle Dark` oppure `-AppleInterfaceStyle Light`. L’avvio normale segue l’aspetto di sistema.
 
 ## Firma e notarizzazione per distributori
 
@@ -58,4 +58,8 @@ python3 tools/export-source.py --output /tmp/Lindo-source --zip /tmp/Lindo-sourc
 
 La destinazione deve essere nuova. L'export usa una allowlist, rifiuta symlink e possibili segreti e scrive `SOURCE-MANIFEST.json` con SHA-256 e permessi dei file. Lo ZIP usa ordine, timestamp e permessi normalizzati: a parità di sorgenti produce gli stessi byte. Non include storia Git, dati di lavoro, archivi di release o credenziali.
 
-La CI usa il runner `macos-26` arm64 documentato da [GitHub](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), con Xcode 26.0.1 per Swift 6.2 e Xcode 26.6 per una seconda toolchain. Versioni e disponibilità sono verificate all'avvio. Riferimenti: [immagine runner](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md) e [note Apple Xcode 26.0.1](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_0_1-release-notes).
+La CI usa il runner `macos-26` arm64 documentato da [GitHub](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), con Xcode 26.0.1 e Xcode 26.6 per verificare due configurazioni SDK. Versioni e disponibilità sono verificate all'avvio. Riferimenti: [immagine runner](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md) e [note Apple Xcode 26.0.1](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_0_1-release-notes).
+
+## Strumenti opzionali
+
+Con Homebrew puoi eseguire `brew install clamav rclone`. In Lindo scegli Strumenti di sistema, Protezione e aggiornamento delle firme. Il primo download richiede una connessione. Un account Dropbox, Google Drive o OneDrive configurato con `rclone config` abilita Archivi cloud. Lindo non riceve password né token tramite la finestra. Apple Mail, Chrome e Finder gestiscono i permessi Automazione tramite macOS. La presenza dell'entitlement Apple Events rende possibile presentare la richiesta.

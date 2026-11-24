@@ -1,22 +1,22 @@
 # Lindo
 
-Una piccola utility nativa per capire cosa occupa spazio sul Mac e scegliere cosa spostare nel Cestino. Gratuita e open source, senza account, telemetria o servizi in background. Interfaccia in italiano.
+Lindo 0.8.0 è una utility macOS scritta in Rust per individuare cosa occupa spazio e scegliere quali file conservare. Richiede macOS 26 e Apple Silicon. La panoramica mostra lo spazio libero, permette di cercare gli strumenti e di salvare i preferiti.
 
-**Stato: candidata 0.6.0, distribuzione del sorgente.** Le build di sviluppo non sono notarizzate. La CI pubblica documenta i controlli eseguiti; non sostituisce le prove sui dispositivi e sui servizi cloud reali.
+## Funzioni
 
-## Cosa puoi fare
+- Apri la mappa proporzionale per esplorare una cartella. Salva la misura per confrontarla con una scansione successiva nella stessa sessione.
+- Trova duplicati esatti, file grandi o vecchi, installatori, archivi e immagini JPEG, PNG o HEIC simili. Per le immagini puoi esaminare i percorsi e scegliere quali copie mettere nel Cestino.
+- Esamina cache di sviluppo, modelli AI, backup iOS, app e relativi file riconosciuti. Puoi ripristinare le preferenze di un’app verificata o esaminare le revisioni di un documento locale. La revisione mostra gli elementi selezionati e la copia protetta di ogni gruppo.
+- Gestisci le copie locali degli allegati di Apple Mail, i messaggi selezionati, i link di disiscrizione e le schede duplicate di Chrome. Su iCloud puoi liberare un download già sincronizzato.
+- Apri Archivi cloud per consultare quota e cartelle remote di Dropbox, Google Drive e OneDrive tramite rclone. Spostamento in una cartella di revisione e rimozione online sono azioni distinte.
+- Consulta volumi, snapshot Time Machine, risorse, avvii automatici e aggiornamenti. Gli strumenti di manutenzione richiedono conferma. Per le azioni privilegiate la richiesta di autorizzazione viene da macOS.
+- Cerca malware con ClamAV o sorveglia una cartella mentre l’app è aperta, aggiorna le firme e rivedi le rilevazioni prima del Cestino. Monitora il disco dalla barra dei menu mentre Lindo è aperta.
 
-- Esplorare una mappa dello spazio in sola lettura.
-- Trovare file grandi nelle cartelle che scegli.
-- Confrontare duplicati esatti e scegliere la copia da conservare.
-- Esaminare cache HTTP riconosciute e log utente vecchi di almeno sette giorni.
-- Inventariare le applicazioni e rimuovere il solo bundle, mantenendo preferenze e documenti.
-
-Nessun elemento viene preselezionato. Prima del Cestino vedi l'elenco preciso e le copie conservate. Lindo ricontrolla scope, identità dei file e le condizioni pertinenti alla rimozione. Non svuota il Cestino e non chiede privilegi amministratore.
+Il dettaglio dei provider, dei limiti e delle verifiche è in [FEATURES.md](FEATURES.md).
 
 ## Provala dal sorgente
 
-Servono un Mac Apple Silicon, macOS 26 e Swift 6.2 o successivo. Non ci sono dipendenze esterne. Con Apple Command Line Tools oppure Xcode installato:
+Servono un Mac Apple Silicon, macOS 26, Rust con Cargo e gli Apple Command Line Tools. Cargo scarica le dipendenze bloccate in Cargo.lock alla prima compilazione.
 
 ```sh
 git clone https://github.com/piernicoladm/lindo.git

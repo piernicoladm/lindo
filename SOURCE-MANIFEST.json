@@ -1,28 +1,46 @@
 {
   "files": [
     {
-      "bytes": 3889,
+      "bytes": 3304,
       "mode": "0644",
       "path": ".github/workflows/ci.yml",
-      "sha256": "d58f41b2f8ad1aa2b11511be831fc6756a7d2326c51706baefd7d0e189f4a8ee"
+      "sha256": "27f77ba02bf669202ed6b3317547f86639484c9b602615fb983e6973097c99bc"
     },
     {
-      "bytes": 45,
+      "bytes": 66,
       "mode": "0644",
       "path": ".gitignore",
-      "sha256": "20e94e95f80009ffd42dc57bf66fad34a377a2d5253af3830545d6609a019cec"
+      "sha256": "1a33e34b47aa890c0c296d029f4039092146e5adaa9992bf62516b0b1b050d86"
     },
     {
-      "bytes": 4931,
+      "bytes": 5125,
       "mode": "0644",
       "path": "BUILD.md",
-      "sha256": "927483e1d7dd3997952bb347f125472d9bb4c949949694fde1dfcea9e4466de9"
+      "sha256": "7fac270bdd67913d3e7952304b8caff5afdf13f2e38ea2111bdbafb20b9822e6"
     },
     {
-      "bytes": 2013,
+      "bytes": 2012,
       "mode": "0644",
       "path": "CONTRIBUTING.md",
-      "sha256": "bbd6c5fc0767a61e8f8a78426ecff2d72c5db72bf3f828130f74505a79905915"
+      "sha256": "7623c47f0ce1ed4d0ab5fb9dea62c4b20d9b70053175c2c5a3e5abc4b40d14d5"
+    },
+    {
+      "bytes": 89132,
+      "mode": "0644",
+      "path": "Cargo.lock",
+      "sha256": "40cb584096c3bbbcd8c22ebe75841756741b91b200f5a08340c1f744ca179d20"
+    },
+    {
+      "bytes": 1049,
+      "mode": "0644",
+      "path": "Cargo.toml",
+      "sha256": "b959f687fca9c2e4ea9129631fe9f3724d5bd971340ddb9ee646a97276894414"
+    },
+    {
+      "bytes": 8374,
+      "mode": "0644",
+      "path": "FEATURES.md",
+      "sha256": "bf6bccd64c28a46673bd6da3e7bea6001a1ef797237499b77f04114a7f1a9e07"
     },
     {
       "bytes": 304,
@@ -49,10 +67,10 @@
       "sha256": "b43a21bfc95ca8fc9bd319c97d1be224b2b9b5e04161920dfe9f1d9ad520f27e"
     },
     {
-      "bytes": 2145,
+      "bytes": 2283,
       "mode": "0644",
       "path": "Info.plist.in",
-      "sha256": "07709e763ffaa1d21b544075706950ef42cd3c706a0e5b8931d8bd49e3766dbe"
+      "sha256": "0cd8abdebc7e84c07fc4dc3902ae416188f057aac6faf485b2f9f9888f8b3ba2"
     },
     {
       "bytes": 1076,
@@ -61,400 +79,244 @@
       "sha256": "aaf6699d4dd7c5a420ef33a0fd92183617daab9d5a1b7a42aff4a1746db2a953"
     },
     {
-      "bytes": 579,
+      "bytes": 247,
       "mode": "0644",
-      "path": "Package.swift",
-      "sha256": "2c76f41ee3522cfd2ca9759dbbb0b18bfaae30c007c8fa195aba341f16358032"
+      "path": "Lindo.entitlements",
+      "sha256": "c479446ccc1537f8b64d0bc2c4a7b5a64f80753659d0cdf5450c2927df8eb29b"
     },
     {
-      "bytes": 2998,
+      "bytes": 3745,
       "mode": "0644",
       "path": "README.md",
-      "sha256": "137bc2bcce4249194c8ccf6650d2f6e91cc05bbdb9107b3a0bbd5d3e10a09131"
+      "sha256": "61635744b90d5723abb352bb1009b217264bec8dfd65bd7bb192cac62a7e52c0"
     },
     {
-      "bytes": 2527,
+      "bytes": 3387,
       "mode": "0644",
       "path": "SECURITY.md",
-      "sha256": "1f50838951b7011f72289629231794437a2879547a5609ff28ecb6278951115c"
+      "sha256": "89f5d15bedb17bb5aca48357145d9f55133cd3616a0fab18ec7ce26a48b18083"
     },
     {
-      "bytes": 5572,
-      "mode": "0644",
-      "path": "Sources/Lindo/App.swift",
-      "sha256": "4bac3e63bd47ffd6a30c39998993eb6c8a09c3b63915c28f5bda23141265d806"
-    },
-    {
-      "bytes": 157,
-      "mode": "0644",
-      "path": "Sources/Lindo/AppInfo.swift",
-      "sha256": "aaba47260af80143883e014c6b9f985e8fb7dbfcdae48ddbce2fca09343a4cc7"
-    },
-    {
-      "bytes": 9545,
-      "mode": "0644",
-      "path": "Sources/Lindo/ContentView.swift",
-      "sha256": "6ef35322890dfc25f706f2585ca47406ce43aff4e327bebb65171b8b9fcd3a15"
-    },
-    {
-      "bytes": 1664,
-      "mode": "0644",
-      "path": "Sources/Lindo/CoverageSelfTest.swift",
-      "sha256": "e287d977676765324a90f94e13836aa0113ce2bb5e1ab613052ef45604ddf098"
-    },
-    {
-      "bytes": 2002,
-      "mode": "0644",
-      "path": "Sources/Lindo/DuplicateSupport.swift",
-      "sha256": "e1f34721f79a9add2b1858639ad52b0412fbcf54a0ad74a7bebb1d8cbb66fe5f"
-    },
-    {
-      "bytes": 12833,
-      "mode": "0644",
-      "path": "Sources/Lindo/DuplicateView.swift",
-      "sha256": "db727bbe2e0133532ba99f5686570f6d391fb34e7ea94287ad0f4c406894bfa0"
-    },
-    {
-      "bytes": 10748,
-      "mode": "0644",
-      "path": "Sources/Lindo/FolderBrowser.swift",
-      "sha256": "a8c8d79d89fb4213a310b3f12890e45fa32e7e7a6d2155adf6f5351d8cba04be"
-    },
-    {
-      "bytes": 4232,
-      "mode": "0644",
-      "path": "Sources/Lindo/FolderPicker.swift",
-      "sha256": "adb947f63e5c1ed47345bb5af25fa6b021949a7e796569749823dcd10ae37ba6"
-    },
-    {
-      "bytes": 9362,
-      "mode": "0644",
-      "path": "Sources/Lindo/FolderPickerSelfTest.swift",
-      "sha256": "0486e653b27e675711a2fb9a5cd134ec9dba686f18ca263b4406f83b2e2828f5"
-    },
-    {
-      "bytes": 24717,
-      "mode": "0644",
-      "path": "Sources/Lindo/Models.swift",
-      "sha256": "5b033c822695a37b5639adc0d2216c2d5ccce1d6eb68deeb7b6a76271fc986eb"
-    },
-    {
-      "bytes": 4827,
-      "mode": "0644",
-      "path": "Sources/Lindo/PickerProbe.swift",
-      "sha256": "e8d4e4834fdc7eec4e0908dee16729cd6b49cc747df8bc2dd9be0cf39e6ed232"
-    },
-    {
-      "bytes": 8309,
-      "mode": "0644",
-      "path": "Sources/Lindo/ProductSelfTest.swift",
-      "sha256": "29cdbb0904913d5d4f93a463c9f213ce0960947be0fddff4246edd83844c2ced"
-    },
-    {
-      "bytes": 3918,
-      "mode": "0644",
-      "path": "Sources/Lindo/ResultsProjection.swift",
-      "sha256": "acfd70a3faeeb541775ade4960942a0838e7f5909d5c99cf745f0b832ed26ca0"
-    },
-    {
-      "bytes": 11381,
-      "mode": "0644",
-      "path": "Sources/Lindo/ResultsView.swift",
-      "sha256": "432fc1da20b30b1f99c9b20d974bc48efada7b643ebcf248d646ed18a5debc4a"
-    },
-    {
-      "bytes": 2159,
-      "mode": "0644",
-      "path": "Sources/Lindo/ReviewPresentation.swift",
-      "sha256": "b2bcc0c56a9748d9a801fa5741704627eb6d9db44ac3a8fdb650c79c5f028fd1"
-    },
-    {
-      "bytes": 11792,
-      "mode": "0644",
-      "path": "Sources/Lindo/ReviewSelfTest.swift",
-      "sha256": "5425d713e72fe93ce6416e4838cfde905e53ba10927ab160f15230e86d4515c8"
-    },
-    {
-      "bytes": 9155,
-      "mode": "0644",
-      "path": "Sources/Lindo/ReviewView.swift",
-      "sha256": "dcef1ca59ea7acd5309d39901e1b14fedd05bb587a605bc1fe88bd630fe07c31"
-    },
-    {
-      "bytes": 2710,
-      "mode": "0644",
-      "path": "Sources/Lindo/ScanPresentation.swift",
-      "sha256": "4fcf3324b32135db6846c52588c8ed4e068557aec4c9257514c0db960dd7628e"
-    },
-    {
-      "bytes": 1235,
-      "mode": "0644",
-      "path": "Sources/Lindo/ScopePresentation.swift",
-      "sha256": "1654f9879721b5e2994f9066e8f2d3ca06d57d0b04279dd60ed7ba139fc14905"
-    },
-    {
-      "bytes": 36275,
-      "mode": "0644",
-      "path": "Sources/Lindo/Snapshot.swift",
-      "sha256": "b21103f9a68fe2250d0454ad137bedab5a424542e32ca71adade56dc7e4bf42a"
-    },
-    {
-      "bytes": 12604,
-      "mode": "0644",
-      "path": "Sources/Lindo/SpaceMapView.swift",
-      "sha256": "5730dd0a8987d5bb4c07d5cd98fd39a56d5f015383f27034e533a77b2e46555b"
-    },
-    {
-      "bytes": 3286,
-      "mode": "0644",
-      "path": "Sources/Lindo/UI/Brand.swift",
-      "sha256": "651281b13ba7a213e29e928a3e4fdf5ba5a979511e03489d5e4fbef4a8a541e2"
-    },
-    {
-      "bytes": 5931,
-      "mode": "0644",
-      "path": "Sources/Lindo/UI/Grid.swift",
-      "sha256": "99ea1d53353b5fb75c12ea770c29fb7588fc0790437f56924dfefa4bfd6ec67f"
-    },
-    {
-      "bytes": 485,
-      "mode": "0644",
-      "path": "Sources/Lindo/UI/Tokens.swift",
-      "sha256": "9275a67efb9c434ddd55b0bfe85cbe344d8506e80dae46cc3685fd9910b08e47"
-    },
-    {
-      "bytes": 3556,
-      "mode": "0644",
-      "path": "Sources/Lindo/UI/UXComponents.swift",
-      "sha256": "f952040ab80b9301351015317cc4f14f0725c354b55ff86aa6d971a9f5fc545f"
-    },
-    {
-      "bytes": 2890,
-      "mode": "0644",
-      "path": "Sources/Lindo/UI/WindowBehavior.swift",
-      "sha256": "2269241a898600c2e476cc85da5914475ab804491c5811bfa40ec51abfa741bf"
-    },
-    {
-      "bytes": 2866,
-      "mode": "0644",
-      "path": "Sources/Lindo/UXSelfTest.swift",
-      "sha256": "6eff6ff597a0c96531915dda292d1822e68878d30c175acc54c2a0a5ccb11392"
-    },
-    {
-      "bytes": 5060,
-      "mode": "0644",
-      "path": "Sources/LindoKit/CachePolicy.swift",
-      "sha256": "aa6e75d438be178d15bd6cc9867db437c7af6ea413e32a6ad3087ffc27127935"
-    },
-    {
-      "bytes": 18232,
-      "mode": "0644",
-      "path": "Sources/LindoKit/DuplicateScanner.swift",
-      "sha256": "ac34366769a620cefa7829e0fa96361e13d128b11f06a385bd8f31db51bcf8af"
-    },
-    {
-      "bytes": 1981,
-      "mode": "0644",
-      "path": "Sources/LindoKit/FileSyncStatus.swift",
-      "sha256": "5d214e3a48c8b3689c749e55fb35ce38bee5464f1c6a63dbdfc4b8835e2f1555"
-    },
-    {
-      "bytes": 14405,
-      "mode": "0644",
-      "path": "Sources/LindoKit/FolderDirectoryReader.swift",
-      "sha256": "6f70121a50736b6f033b72dd1e2e38e4ae597fe668552687f2b4744de1633812"
-    },
-    {
-      "bytes": 37406,
-      "mode": "0644",
-      "path": "Sources/LindoKit/MacScanner.swift",
-      "sha256": "56f57318749b1ae60e187dec252e3ec85a80e23207119d0ec49d10f5eeacfd8f"
-    },
-    {
-      "bytes": 4520,
-      "mode": "0644",
-      "path": "Sources/LindoKit/ProcessInventory.swift",
-      "sha256": "fde6cac900fd6f48a5869f87de6150eaacd12d5a1c6978cfa3fb6d41a2526437"
-    },
-    {
-      "bytes": 1087,
-      "mode": "0644",
-      "path": "Sources/LindoKit/ScanCoverage.swift",
-      "sha256": "a5528105849503f510cb4507b992deb048f74fba5b27ebf37d621f7695b7d5f6"
-    },
-    {
-      "bytes": 2461,
-      "mode": "0644",
-      "path": "Sources/LindoKit/ScanPathPolicy.swift",
-      "sha256": "a06be31a444e10291988d092e2ba14639ae78b2b516eabe4600f4fdca6850d6b"
-    },
-    {
-      "bytes": 3366,
-      "mode": "0644",
-      "path": "Sources/LindoKit/ScanReadExecutor.swift",
-      "sha256": "1d6adca8acde310e903822d2d1abb468cb5309efd2da441e86e9853f3cfde488"
-    },
-    {
-      "bytes": 13775,
-      "mode": "0644",
-      "path": "Sources/LindoKit/SpaceScanner.swift",
-      "sha256": "be158b1d4678cd6b094178937ec900280a546e86b8766c93aede4806fdd6f5eb"
-    },
-    {
-      "bytes": 15137,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/AdversarialRegressionTests.swift",
-      "sha256": "461068f25462abe5af83e735b98172036b51d2ca542c84712e277d65b609d2f2"
-    },
-    {
-      "bytes": 8135,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ApplicationInventoryRegressionTests.swift",
-      "sha256": "66f09660299590540fa0889869addef33104fcebf9561f53fdd4d310ddaef68f"
-    },
-    {
-      "bytes": 10949,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/CachePolicyTests.swift",
-      "sha256": "6397d4b6c10f4f0a36f1b6b9c09464b5dee3627bcaefa6502a48e8a6b2335bf8"
-    },
-    {
-      "bytes": 6508,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ColdSafetyRegressionTests.swift",
-      "sha256": "2e7d3b76753b761e38d40147da8def0c6f8ec34338da34eb41c92cac5a283250"
-    },
-    {
-      "bytes": 5635,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ColdScanReportTests.swift",
-      "sha256": "8d63a9cd9a2b63912d8bd9ef22ee9a93317a72230bb00efac91f81588936a811"
-    },
-    {
-      "bytes": 10056,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/DuplicateScannerTests.swift",
-      "sha256": "2902325e850f2e21c6bbe7e48d9ad77b95b1ab8885d7d7dc1bca7b2cba4f5d81"
-    },
-    {
-      "bytes": 2500,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/FileSyncStatusTests.swift",
-      "sha256": "54b8d805979850db92d631db806defb8819a3bbad98e00ce7808564fae3d0525"
-    },
-    {
-      "bytes": 10797,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/FolderDirectoryReaderTests.swift",
-      "sha256": "9982e98d77f32e682f983d19e2703216916e2ac4fbfaa329b9eb332f3dd49b70"
-    },
-    {
-      "bytes": 729,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ProcessInventoryTests.swift",
-      "sha256": "e58534d4aa57eff0af2708ef7503726f0604adc392784e078ee75438268d1236"
-    },
-    {
-      "bytes": 7105,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/RealTrashIntegrationTests.swift",
-      "sha256": "3800f783694980e50b1490c8cdb706b99e0f38d471d6f52637756ff712ba6b32"
-    },
-    {
-      "bytes": 5172,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ScaleRegressionTests.swift",
-      "sha256": "1fca3edbf7e75d0c63325c884cec7a620afb4d21ce77e91b4bf542855e6b45fa"
-    },
-    {
-      "bytes": 2694,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ScanAncestorReplacementTests.swift",
-      "sha256": "c109b2b1b997fd0fc48fd7a2de40b8d1e4ad14abe347e424ec3eabf578849bac"
-    },
-    {
-      "bytes": 4976,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ScanCancellationTests.swift",
-      "sha256": "221c6b03722c25fbb02a1f63f17939e9d0922218b851d1f2ef7b81d7fd4c8c35"
-    },
-    {
-      "bytes": 5069,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ScanConcurrencyTests.swift",
-      "sha256": "3ce3d0e2bbc693550a9597a2e2b9f31a92f54335b26ddd9bb45186c67c839f1d"
-    },
-    {
-      "bytes": 7556,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ScanCoverageTests.swift",
-      "sha256": "df7f82c36c2d11b9a58731be8a86e704e75c3f369df1314a24febc8be21eb8bc"
-    },
-    {
-      "bytes": 15618,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/ScannerTests.swift",
-      "sha256": "54730955e4830e4925a625a962fe5667f922cb4a8f69cc194d6c0b1116b6c4c6"
-    },
-    {
-      "bytes": 8515,
-      "mode": "0644",
-      "path": "Tests/LindoKitTests/SpaceScannerTests.swift",
-      "sha256": "4bcf4b29cea51db0a4a52077bf273d48b3b1e686b3fe999300f402e9a37bf0c6"
-    },
-    {
-      "bytes": 4467,
+      "bytes": 4726,
       "mode": "0755",
       "path": "build.sh",
-      "sha256": "f5f16968ea4e31eec240a102e8eabe27ad409df513d768a5624b73da57404aa0"
+      "sha256": "2735511ae590912205fd7eac1c7270843b9bd724104a1b2a4cc44f5d6409db59"
     },
     {
-      "bytes": 5909,
-      "mode": "0755",
-      "path": "tools/check-layout.swift",
-      "sha256": "cb999365bfcaeb791d09f169ade8cb6d1418b083a269a84a0591cb223fd0ad17"
+      "bytes": 96861,
+      "mode": "0644",
+      "path": "launch/brand/assets/AppIcon.icns",
+      "sha256": "7223e2013d2ff00e6f67fd8e80d7acd02ca2cba622daf30215cd3a551d4baf87"
     },
     {
-      "bytes": 3889,
+      "bytes": 42255,
+      "mode": "0644",
+      "path": "src/accounts.rs",
+      "sha256": "12623e31633e0e1b3a7f7178a4b95d1b482c2a760a3248761b9b1ad5fd995508"
+    },
+    {
+      "bytes": 9990,
+      "mode": "0644",
+      "path": "src/accounts_attachments.rs",
+      "sha256": "b8b95bbf8a6bdc3ed37af2ed648b39a575b6c7e4449db2670d147fe46faecc8f"
+    },
+    {
+      "bytes": 7306,
+      "mode": "0644",
+      "path": "src/accounts_browser.rs",
+      "sha256": "57db6f51f3f0772a13ded38408b347ad9b4b880ac9e24d5caa58194df64c3e38"
+    },
+    {
+      "bytes": 33945,
+      "mode": "0644",
+      "path": "src/app_reset.rs",
+      "sha256": "30fa13e5fa845c605960d2638ca5bb1fec10dfe990662e56f3e0a57ce141dabb"
+    },
+    {
+      "bytes": 17315,
+      "mode": "0644",
+      "path": "src/assessment.rs",
+      "sha256": "001bd25d2e52ced516adafce0b2086760c66e6e0ce5b94ed617da4d47aa56d1f"
+    },
+    {
+      "bytes": 21954,
+      "mode": "0644",
+      "path": "src/clutter.rs",
+      "sha256": "8bcf8d03d165d78e52371ceec0f3ac9e81fc7ff9adfec28b7671bf309c0a4ea2"
+    },
+    {
+      "bytes": 17224,
+      "mode": "0644",
+      "path": "src/clutter_images.rs",
+      "sha256": "e5c6877527b470957ab136856c93875a6ea6a35bba32ec81eab8ccd12a539c5f"
+    },
+    {
+      "bytes": 17094,
+      "mode": "0644",
+      "path": "src/desktop.rs",
+      "sha256": "0f3b9b50799a14a29ed834934840cd94cf3d647b6b38aabfad1e1e2c91e3bf85"
+    },
+    {
+      "bytes": 13562,
+      "mode": "0644",
+      "path": "src/desktop_meter.rs",
+      "sha256": "2a8192d284443ef1c437057f654aa5a369e9182ad73403a33dc1f68a1bdf030f"
+    },
+    {
+      "bytes": 572,
+      "mode": "0644",
+      "path": "src/extras.rs",
+      "sha256": "a64b974c75ed069f1d17c8a1a73a813c66df6f1b78601a253ee3436c8e369ec6"
+    },
+    {
+      "bytes": 17135,
+      "mode": "0644",
+      "path": "src/file_versions.rs",
+      "sha256": "3e869e34073c61453929e81cf63785096eff09a9631f615edc9e5f7650cac77f"
+    },
+    {
+      "bytes": 29782,
+      "mode": "0644",
+      "path": "src/junk.rs",
+      "sha256": "6a74159c958cfb1af4ae041894a5a6cfebdf5305f2b5ce7cea6ec3e1aaa26238"
+    },
+    {
+      "bytes": 8960,
+      "mode": "0644",
+      "path": "src/junk_caches.rs",
+      "sha256": "c4f7ce8b84a4643bf5dafb9ea79433a9ecb039fdbeeb6a7bb695531b2e672f02"
+    },
+    {
+      "bytes": 11530,
+      "mode": "0644",
+      "path": "src/junk_formats.rs",
+      "sha256": "ef508157aa3c5f74365f20e37fb53302e9281fb980d5600d1388e31195ad005c"
+    },
+    {
+      "bytes": 11250,
+      "mode": "0644",
+      "path": "src/junk_ollama.rs",
+      "sha256": "2ba7ab676a6d34467784f46bad8c191fd02d6dde174ec05b3e4ff8814c5a616e"
+    },
+    {
+      "bytes": 34593,
+      "mode": "0644",
+      "path": "src/legacy_junk.rs",
+      "sha256": "5f9b48e0c01c8a8a52f5ee823739073d7128f5310d96d064c7609fae32913e76"
+    },
+    {
+      "bytes": 2862,
+      "mode": "0644",
+      "path": "src/main.rs",
+      "sha256": "064295c28a0a310f0a0af40d8ec2ac80d9754fdda46c9a89f6748eb63e948fd4"
+    },
+    {
+      "bytes": 1377,
+      "mode": "0644",
+      "path": "src/model.rs",
+      "sha256": "d279a45e35cb91c59e19fbb47ab0ef724d3c7abc67b96a7aa2029dc88c2226c9"
+    },
+    {
+      "bytes": 20673,
+      "mode": "0644",
+      "path": "src/picker.rs",
+      "sha256": "be02a9e4183a76a0f027b23e9f4614358d7f459ff4c34f868efef7a11ee636f6"
+    },
+    {
+      "bytes": 15357,
+      "mode": "0644",
+      "path": "src/policy.rs",
+      "sha256": "139b23160478c44d48d8771cd5feb6d17bd3af7fd9a1b77a87e1bd9508ce65d6"
+    },
+    {
+      "bytes": 32031,
+      "mode": "0644",
+      "path": "src/remote.rs",
+      "sha256": "4247af4ff18810a6924b04444f0282957fb307dbb028e052a4616c5a55a97475"
+    },
+    {
+      "bytes": 2495,
+      "mode": "0644",
+      "path": "src/responsiveness_tests.rs",
+      "sha256": "2fc934b252a167332139192b92446cee1f1d695aee679b748992bc7a20ef655a"
+    },
+    {
+      "bytes": 34919,
+      "mode": "0644",
+      "path": "src/scan.rs",
+      "sha256": "b243e307b73d2a90d43cea76311fcce6052fb4079024f625c48df13a155b8a2b"
+    },
+    {
+      "bytes": 4081,
+      "mode": "0644",
+      "path": "src/system_command.rs",
+      "sha256": "048a33ea90ee9f7f98bc1e990a47e6781a3960d69bdf5602f48a9f316ad73309"
+    },
+    {
+      "bytes": 15121,
+      "mode": "0644",
+      "path": "src/system_maintenance.rs",
+      "sha256": "4354cf1d48dbfd1f2d031d4cf10d20bb330c5af0f955d9185dbc2fe0da452843"
+    },
+    {
+      "bytes": 15818,
+      "mode": "0644",
+      "path": "src/system_monitor.rs",
+      "sha256": "540db4a2926dad433487d26988f2799d69083879735056a68a16e7058302d02c"
+    },
+    {
+      "bytes": 17307,
+      "mode": "0644",
+      "path": "src/system_scan.rs",
+      "sha256": "d023332a1131319179a13cf95432a0e660746ea69c9f820cb33021b583011c34"
+    },
+    {
+      "bytes": 3506,
+      "mode": "0644",
+      "path": "src/system_signatures.rs",
+      "sha256": "53bb1c015dbd5c72099422730aac930b894315629541023825be34a7659263d9"
+    },
+    {
+      "bytes": 25040,
+      "mode": "0644",
+      "path": "src/system_tools.rs",
+      "sha256": "ce4917d4ae0355556e884c24c5042adb8b32f7ad98c8e94b7fa3e0e02cc5b5df"
+    },
+    {
+      "bytes": 39201,
+      "mode": "0644",
+      "path": "src/trash.rs",
+      "sha256": "6ef60fcb002b80574b0b0f311bddc402850accc6a32a228041d6cd8c837d5fba"
+    },
+    {
+      "bytes": 3843,
+      "mode": "0644",
+      "path": "src/treemap.rs",
+      "sha256": "143d516012a142f4b3114da9fd77272c0bbff635f171dc4e2210945a2b0051b1"
+    },
+    {
+      "bytes": 81293,
+      "mode": "0644",
+      "path": "src/ui.rs",
+      "sha256": "264ee0e0992d6a303cbc0e62da1eb7386b7a2a226ec8d1741cec92ab3394cc1f"
+    },
+    {
+      "bytes": 25995,
+      "mode": "0644",
+      "path": "src/vendor_updates.rs",
+      "sha256": "c2304ce6e0725cb114dbc0ad16e0867883d3e5e7c4db4d7c4dc75def9424a57f"
+    },
+    {
+      "bytes": 3304,
       "mode": "0644",
       "path": "tools/ci/public-ci.yml",
-      "sha256": "d58f41b2f8ad1aa2b11511be831fc6756a7d2326c51706baefd7d0e189f4a8ee"
+      "sha256": "27f77ba02bf669202ed6b3317547f86639484c9b602615fb983e6973097c99bc"
     },
     {
-      "bytes": 3732,
-      "mode": "0644",
-      "path": "tools/draw-icon.swift",
-      "sha256": "57e067e04e7802278177648ddbcaac89f5e17abd7eb193431051c3129672ed68"
-    },
-    {
-      "bytes": 6990,
+      "bytes": 7214,
       "mode": "0755",
       "path": "tools/export-source.py",
-      "sha256": "8e56808f56c4e2e05b47f0f49ac1b14638b8a7211fd6def0e245f84b5a3a9fed"
-    },
-    {
-      "bytes": 7412,
-      "mode": "0644",
-      "path": "tools/generate-brand.py",
-      "sha256": "3cc87f8dd6a8ba2d619cd16197995b3344fa08c10fe1761f559ba91338ff1366"
-    },
-    {
-      "bytes": 1233,
-      "mode": "0755",
-      "path": "tools/grid-lint.sh",
-      "sha256": "438fa67a1c081a395862965e1771588b48229856f18e3083df0ea1a638dbb6c7"
-    },
-    {
-      "bytes": 1322,
-      "mode": "0755",
-      "path": "tools/icon_review.sh",
-      "sha256": "507785f43f022d573c77db666f93e0f0401499d1e3df689625c23d33bd94a845"
-    },
-    {
-      "bytes": 1617,
-      "mode": "0644",
-      "path": "tools/icon_sheet.swift",
-      "sha256": "0b885a385085e54f97d52b706e3e2d5d2dc8629d13fd1bac2934a6349b2f8cbc"
+      "sha256": "b2467099da71331b6f992b85f91f4444f9fb7e324390aa23125440157c26d785"
     },
     {
       "bytes": 4280,
@@ -463,46 +325,34 @@
       "sha256": "14aaaa8508ceeec43a7f4bcf2bede569b6dd6f9c8c9894b48b2d5210cb8b6a85"
     },
     {
-      "bytes": 507,
-      "mode": "0755",
-      "path": "tools/make_icon.sh",
-      "sha256": "1f0b1068522890587f3be4663838072e9042de22c277e342c36bc08367ecb590"
-    },
-    {
       "bytes": 11976,
       "mode": "0755",
       "path": "tools/notarize.sh",
       "sha256": "2d1b675bc7fedee3aacb5ed7b6f48c7cede3e01c5211a69f5fa1ec0555a74edb"
     },
     {
-      "bytes": 959,
+      "bytes": 2836,
+      "mode": "0644",
+      "path": "tools/scale-ui.py",
+      "sha256": "1d38fa5fb942a4d00b4cc8a566ebd34acf1f6e26495d983475d84150c35fac08"
+    },
+    {
+      "bytes": 210,
       "mode": "0755",
       "path": "tools/selftest.sh",
-      "sha256": "4b512d7f65bdc9f292e9c4f08199937429e886525ba57af5b4dc22e93cff7be5"
+      "sha256": "cbbe7307a52646dee5fafad7217e19c5b706ee96f778860dce664529f4c21219"
     },
     {
-      "bytes": 319,
-      "mode": "0755",
-      "path": "tools/snap.sh",
-      "sha256": "a9315507d9a8073b481e421b0395fb280aabe6dc98619ca97607110df3de90f1"
-    },
-    {
-      "bytes": 7325,
-      "mode": "0644",
-      "path": "tools/stability-test.py",
-      "sha256": "2977828bb0cc642f13f59f07680cc5e76772eb50bbd09de490a676f5607aabc5"
-    },
-    {
-      "bytes": 5615,
+      "bytes": 5708,
       "mode": "0755",
       "path": "tools/test-export.py",
-      "sha256": "355cee3577bfdbfcdb0bb085840716ac1997a3be0abd0e0493c1a7e5d173d319"
+      "sha256": "f02b75f179fc7401f48dcc7988bcffcf539a9fead50e5850a1464797c377361d"
     },
     {
-      "bytes": 18077,
+      "bytes": 17969,
       "mode": "0755",
       "path": "tools/test-release-safety.sh",
-      "sha256": "eb2b792771b3570513bef4fb3659c0ecb21c0026c0cc5225c9409731d5adcee6"
+      "sha256": "1a62a2dee06201301697d3904d68e296a604b13a6ffaa5061d2bcf860e9c085b"
     }
   ],
   "schema": 1

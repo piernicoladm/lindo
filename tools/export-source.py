@@ -13,14 +13,14 @@ import stat
 import tempfile
 import zipfile
 
-ROOT_FILES = ('.gitignore', 'Package.swift', 'Info.plist.in', 'build.sh', 'LICENSE')
-TOOLS = ('selftest.sh', 'test-release-safety.sh', 'grid-lint.sh', 'snap.sh',
-         'check-layout.swift', 'make_icon.sh', 'draw-icon.swift', 'icon_review.sh',
-         'icon_sheet.swift', 'generate-brand.py', 'install-notarized.sh', 'notarize.sh',
-         'export-source.py', 'test-export.py', 'stability-test.py')
+ROOT_FILES = ('.gitignore', 'Cargo.toml', 'Cargo.lock', 'Info.plist.in', 'Lindo.entitlements', 'build.sh', 'LICENSE')
+TOOLS = ('selftest.sh', 'test-release-safety.sh', 'scale-ui.py', 'install-notarized.sh',
+         'notarize.sh', 'export-source.py', 'test-export.py')
+BUNDLE_ICON = 'launch/brand/assets/AppIcon.icns'
+ICON_SHA256 = '7223e2013d2ff00e6f67fd8e80d7acd02ca2cba622daf30215cd3a551d4baf87'
 ICONS = ('Mark.svg', 'AppIcon.icon/icon.json', 'AppIcon.icon/Assets/back.svg',
          'AppIcon.icon/Assets/front.svg')
-PUBLIC_DOCS = ('README.md', 'BUILD.md', 'SECURITY.md', 'CONTRIBUTING.md')
+PUBLIC_DOCS = ('README.md', 'BUILD.md', 'SECURITY.md', 'CONTRIBUTING.md', 'FEATURES.md')
 PATTERNS = {
     'private-key': re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----'),
     'github-token': re.compile(r'(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})'),
@@ -53,10 +53,11 @@ def inspect_text(name: str, data: bytes) -> None:
 
 def source_files(root: Path) -> dict[str, Path]:
     files = {name: root / name for name in ROOT_FILES}
-    for folder in ('Sources', 'Tests'):
+    files[BUNDLE_ICON] = root / BUNDLE_ICON
+    for folder in ('src',):
         if not (root / folder).is_dir():
             raise ExportError(f'Missing source directory: {folder}')
-        for path in (root / folder).rglob('*.swift'):
+        for path in (root / folder).rglob('*.rs'):
             if any(part.startswith('.') for part in path.relative_to(root).parts):
                 continue
             files[path.relative_to(root).as_posix()] = path
@@ -85,7 +86,11 @@ def collect(root: Path) -> dict[str, tuple[bytes, int]]:
         if not source.is_file():
             raise ExportError(f'Missing regular source file: {name}')
         data = source.read_bytes()
-        inspect_text(name, data)
+        if name == BUNDLE_ICON:
+            if hashlib.sha256(data).hexdigest() != ICON_SHA256:
+                raise ExportError(f'Unreviewed bundled icon: {name}')
+        else:
+            inspect_text(name, data)
         mode = 0o755 if source.stat().st_mode & 0o111 else 0o644
         result[name] = (data, mode)
     manifest = {'schema': 1, 'files': [

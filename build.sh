@@ -28,23 +28,27 @@ if (( signed )); then
   }
 fi
 mkdir -p "$root/staging" "$root/backups"
-swift build -c "$config" --package-path "$here" --scratch-path "$root/build"
-bindir=$(swift build -c "$config" --package-path "$here" --scratch-path "$root/build" --show-bin-path)
+# rustup installs in ~/.cargo/bin even when Finder does not inherit the shell PATH.
+export PATH="$PATH:$HOME/.cargo/bin"
+export CARGO_TARGET_DIR="$root/rust-target"
+cargo_flags=(--locked --manifest-path "$here/Cargo.toml" --bin Lindo)
+if [[ "$config" == release ]]; then cargo_flags+=(--release); fi
+cargo build "${cargo_flags[@]}"
+bindir="$CARGO_TARGET_DIR/$config"
 [[ -x "$bindir/Lindo" ]] || { print -u2 'Missing executable'; exit 1; }
-"$here/tools/make_icon.sh"
 stage=$(mktemp -d "$root/staging/install.XXXXXXXX")
 app="$stage/Lindo.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bindir/Lindo" "$app/Contents/MacOS/Lindo"
-cp "$root/icon/AppIcon.icns" "$app/Contents/Resources/"
+cp "$here/launch/brand/assets/AppIcon.icns" "$app/Contents/Resources/"
 sed "s/__BUILD__/$(date +%Y%m%d%H%M%S)/" "$here/Info.plist.in" > "$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist"
 if (( signed )); then
-  codesign --force --sign "$identity" --options runtime --timestamp "$app"
+  codesign --force --sign "$identity" --options runtime --timestamp --entitlements "$here/Lindo.entitlements" "$app"
   requirement='anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[subject.OU] = "'"$team"'"'
   codesign --verify --deep --strict -R="$requirement" "$app"
 else
-  codesign --force --sign - "$app"
+  codesign --force --sign - --entitlements "$here/Lindo.entitlements" "$app"
 fi
 codesign --verify --deep --strict --verbose=2 "$app"
 if (( ! install )); then
