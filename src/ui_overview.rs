@@ -656,23 +656,37 @@ impl Lindo {
         }
         ui.add_space(18.);
         ui.separator();
-        for (mode, name, indices) in [
-            (Mode::Large, "File grandi", &[0][..]),
-            (Mode::Duplicates, "Duplicati", &[1][..]),
-            (Mode::Cache, "Cache e log", &[2, 3][..]),
-        ] {
-            let coverage = coverage(
-                indices
-                    .iter()
-                    .map(|&i| self.pages[&REVIEW[i]].result.as_ref()),
-            );
-            let amount = amounts.map(|a| indices.iter().fold(0u64, |s, &i| s.saturating_add(a[i])));
-            let detail = category_amount(coverage, amount);
-            if row(ui, mode, name, &detail, true).clicked() {
-                if mode == Mode::Cache {
-                    self.home_panel.inspect = Some(true);
-                } else {
+        if finished_quick {
+            // These are the three scopes from this scan. The other pages still
+            // retain their earlier reports, but those bytes belong to a different run.
+            for mode in QUICK {
+                let result = self.pages[&mode].result.as_ref();
+                let detail =
+                    category_amount(coverage(std::iter::once(result)), result.map(|r| r.total));
+                if row(ui, mode, title(mode), &detail, true).clicked() {
                     self.mode = Some(mode);
+                }
+            }
+        } else {
+            for (mode, name, indices) in [
+                (Mode::Large, "File grandi", &[0][..]),
+                (Mode::Duplicates, "Duplicati", &[1][..]),
+                (Mode::Cache, "Cache e log", &[2, 3][..]),
+            ] {
+                let coverage = coverage(
+                    indices
+                        .iter()
+                        .map(|&i| self.pages[&REVIEW[i]].result.as_ref()),
+                );
+                let amount =
+                    amounts.map(|a| indices.iter().fold(0u64, |s, &i| s.saturating_add(a[i])));
+                let detail = category_amount(coverage, amount);
+                if row(ui, mode, name, &detail, true).clicked() {
+                    if mode == Mode::Cache {
+                        self.home_panel.inspect = Some(true);
+                    } else {
+                        self.mode = Some(mode);
+                    }
                 }
             }
         }
@@ -766,7 +780,7 @@ impl Lindo {
                     self.home_panel.scope.apply(&mut reqs);
                     egui::ScrollArea::vertical()
                         .id_salt("scan-scopes")
-                        .max_height((ctx.screen_rect().height() * 0.35).clamp(96., 250.))
+                        .max_height((ctx.screen_rect().height() * 0.25).clamp(80., 210.))
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                             for req in &reqs {

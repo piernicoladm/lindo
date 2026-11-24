@@ -1293,7 +1293,15 @@ impl eframe::App for Lindo {
                     } else {
                         let dest = self.destination;
                         egui::ScrollArea::vertical()
-                            .id_salt(("destination", dest.label()))
+                            .id_salt((
+                                "destination",
+                                dest.label(),
+                                if dest == design::Destination::Home {
+                                    self.next_id
+                                } else {
+                                    0
+                                },
+                            ))
                             .show(ui, |ui| match dest {
                                 design::Destination::Home => self.overview(ui, ctx),
                                 design::Destination::Settings => {
