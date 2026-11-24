@@ -585,7 +585,28 @@ impl Lindo {
         }
     }
 
-    pub(super) fn scanning(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    pub(super) fn scan_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let compact = ui.available_width() < 610. || ctx.screen_rect().height() < 560.;
+        let reserve = if compact { 0. } else { 44. };
+        egui::ScrollArea::vertical()
+            .id_salt("active-scan")
+            .max_height((ui.available_height() - reserve).max(1.))
+            .auto_shrink([false, false])
+            .show(ui, |ui| self.scan_contents(ui, ctx, compact));
+        if !compact {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 36.),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    if stop_scan_button(ui) {
+                        self.cancel();
+                    }
+                },
+            );
+        }
+    }
+
+    fn scan_contents(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, compact: bool) {
         let Some(active) = &self.active else {
             return;
         };
@@ -611,7 +632,6 @@ impl Lindo {
                     .saturating_add(active.progress.tree_entries.load(Ordering::Relaxed)),
                 |n, r| n.saturating_add(r.report.visited),
             );
-        let compact = ui.available_width() < 610. || ctx.screen_rect().height() < 560.;
         let mut cancel = false;
         let art = self.artwork.scan.clone();
         let art_rect = hero(ui, &art, |ui| {
@@ -709,14 +729,6 @@ impl Lindo {
                 "In attesa"
             };
             row(ui, m, title(m), state, false);
-        }
-        if !compact {
-            ui.add_space(18.);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if stop_scan_button(ui) {
-                    self.cancel();
-                }
-            });
         }
         ctx.request_repaint_after(Duration::from_millis(150));
     }

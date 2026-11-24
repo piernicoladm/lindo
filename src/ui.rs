@@ -1193,9 +1193,7 @@ impl eframe::App for Lindo {
                             self.tool_query.clear();
                         }
                     } else if scan_page {
-                        egui::ScrollArea::vertical()
-                            .id_salt("active-scan")
-                            .show(ui, |ui| self.scanning(ui, ctx));
+                        self.scan_view(ui, ctx);
                         ctx.request_repaint_after(Duration::from_millis(120));
                     } else if let Some(extra) = self.extra {
                         let proposal = match extra {
