@@ -6,7 +6,7 @@ Prima di proporre una modifica:
 
 1. Riproduci il problema con dati sintetici.
 2. Mantieni prodotti di build e fixture fuori dal checkout.
-3. Esegui `tools/selftest.sh`, `tools/test-release-safety.sh`, `tools/grid-lint.sh` e `python3 tools/test-export.py`.
+3. Esegui `tools/selftest.sh`, `tools/test-release-safety.sh`, `cargo fmt --check` e `python3 tools/test-export.py`.
 4. Descrivi trigger, comportamento prima/dopo, verifiche eseguite e limiti.
 
 Per modifiche alla rimozione, includi una regressione che fallisca senza la protezione. Preserva selezione esplicita, revisione immutabile, copia conservata nei duplicati, controlli di identità/scope e il Cestino. Non aggiungere cancellazione permanente, helper root, scansioni automatiche o raccolta dati.

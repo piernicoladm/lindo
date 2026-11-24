@@ -1,0 +1,26 @@
+[package]
+name = "lindo"
+version = "0.8.0"
+edition = "2021"
+license = "MIT"
+description = "Local disk inspection and reviewed cleanup for macOS"
+
+[[bin]]
+name = "Lindo"
+path = "src/main.rs"
+
+[features]
+ui-probe = []
+
+[dependencies]
+eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "accesskit"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+libc = "0.2"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSURL", "NSFileManager", "NSError", "NSString", "NSUserDefaults"] }
+serde_json = "1"
+url = "2"
+quick-xml = "0.41"
+sha2 = "0.10"
+tempfile = "3"

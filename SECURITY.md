@@ -1,6 +1,6 @@
 # Sicurezza
 
-Lindo opera con i permessi dell'utente, senza helper privilegiati. Non ha rete applicativa, account, telemetria, attività in background o cancellazione permanente. Gli script di notarizzazione contattano Apple soltanto quando invocati esplicitamente dal distributore.
+Lindo parte con i permessi dell’utente. Le scansioni locali restano sul dispositivo. Le funzioni opzionali contattano il provider selezionato tramite rclone, il feed dell’editore, Homebrew o il servizio firme ClamAV. Mail, browser e Finder possono richiedere il permesso Automazione. Le operazioni amministrative hanno un elenco di comandi predefiniti e delegano l’autorizzazione a macOS. Lindo non raccoglie password né telemetria. Il monitor facoltativo vive nel processo della finestra.
 
 ## Confini e protezioni
 
@@ -10,11 +10,15 @@ Le rimozioni richiedono selezione, revisione e conferma. Prima del Cestino vengo
 
 Sono presenti esclusioni conservative per nome, incluse alcune cartelle di archivi privati. Non costituiscono un controllo di accesso generale: non usare i filtri dell'app come sostituto dei permessi del filesystem.
 
+## Operazioni online e irreversibili
+
+Svuota Cestino chiede una conferma separata e usa Finder. Lo svuotamento può interessare più volumi montati. La rimozione di uno snapshot locale perde quel punto di ripristino. Per Mail e i provider cloud una modifica può sincronizzarsi con altri dispositivi. Archivi cloud rivalida identità e metadati del singolo file immediatamente prima della richiesta al provider. Conservazione, quota e tempi di ripristino dipendono dal servizio. Nel Finder “Rimuovi download” riguarda la copia locale.
+
 ## Limiti dichiarati
 
 Le verifiche e `FileManager.trashItem` non sono una singola operazione atomica. Un processo esterno può modificare il filesystem fra il controllo finale e il Cestino. Non viene promesso isolamento da un processo ostile che opera con gli stessi privilegi dell'utente.
 
-Le eliminazioni su cartelle sincronizzate possono propagarsi. I test sintetici non certificano ogni provider cloud o volume di rete. Una chiamata di sistema già bloccata può trattenere un worker fino al ritorno del sistema. Non è presente antivirus o rilevamento malware. Firma e notarizzazione non dimostrano correttezza funzionale né assenza di ogni vulnerabilità.
+Le eliminazioni su cartelle sincronizzate possono propagarsi. I test sintetici non certificano ogni provider cloud o volume di rete. Una chiamata di sistema già bloccata può trattenere un worker fino al ritorno del sistema. Il rilevamento ClamAV richiede un motore installato e firme disponibili. Un esito pulito riguarda soltanto i file effettivamente analizzati. Firma e notarizzazione non dimostrano correttezza funzionale né assenza di ogni vulnerabilità.
 
 ## Segnalazioni
 

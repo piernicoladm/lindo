@@ -35,12 +35,12 @@ elif name == 'codesign':
           (case == 'build-adhoc-invalid' and (pathlib.Path(target) / 'marker').exists())): sys.exit(7)
 elif name == 'spctl':
     if case == 'spctl' and args[-1] == target: sys.exit(7)
-elif name == 'swift':
-    executable = pathlib.Path(os.environ['LINDO_TEST_HOME']) / 'fake-bin/Lindo'
-    executable.parent.mkdir(exist_ok=True)
+elif name == 'cargo':
+    profile = 'release' if '--release' in args else 'debug'
+    executable = pathlib.Path(os.environ['CARGO_TARGET_DIR']) / profile / 'Lindo'
+    executable.parent.mkdir(parents=True, exist_ok=True)
     executable.write_text('new executable')
     executable.chmod(0o755)
-    if '--show-bin-path' in args: print(executable.parent)
 elif name == 'open': pass
 elif name == 'xcrun':
     if args[:2] == ['stapler', 'validate'] and case == 'stapler' and args[-1] == target: sys.exit(7)
@@ -67,7 +67,7 @@ elif name == 'ditto':
 else: raise RuntimeError('Unexpected command: ' + name)
 ''')
 stub.chmod(0o755)
-for name in ['codesign', 'spctl', 'xcrun', 'ditto', 'pgrep', 'PlistBuddy', 'swift', 'open']:
+for name in ['codesign', 'spctl', 'xcrun', 'ditto', 'pgrep', 'PlistBuddy', 'cargo', 'open']:
     (bin_dir / name).symlink_to(stub)
 # Patch only isolated copies: no HOME override, no real app installation path.
 for name in ['install-notarized.sh', 'notarize.sh']:
@@ -77,10 +77,9 @@ for name in ['install-notarized.sh', 'notarize.sh']:
 # Build the isolated script with a synthetic icon tool and plist template.
 build_text = (source.parent / 'build.sh').read_text().replace('$HOME', '$LINDO_TEST_HOME')
 (run / 'build.sh').write_text(build_text)
-(run / 'tools').mkdir()
-icon = run / 'tools/make_icon.sh'
-icon.write_text('#!/bin/zsh\nmkdir -p "$LINDO_TEST_HOME/Library/Developer/Lindo/icon"\nprint icon > "$LINDO_TEST_HOME/Library/Developer/Lindo/icon/AppIcon.icns"\n')
-icon.chmod(0o755)
+icon = run / 'launch/brand/assets/AppIcon.icns'
+icon.parent.mkdir(parents=True)
+icon.write_bytes(b'synthetic icon')
 (run / 'Info.plist.in').write_text('<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleVersion</key><string>__BUILD__</string></dict></plist>')
 failures = []
 def check(condition, label):

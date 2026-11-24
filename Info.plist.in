@@ -8,11 +8,12 @@
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIconName</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.6.0</string>
+<key>CFBundleShortVersionString</key><string>0.8.0</string>
 <key>CFBundleVersion</key><string>__BUILD__</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>Lindo comunica con Finder, Mail e i browser per le azioni che scegli e confermi.</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSDocumentsFolderUsageDescription</key><string>Lindo misura i metadati dell’area che scegli per la mappa e analizza i file locali per trovare file grandi e duplicati. Nessun file viene rimosso senza la tua conferma.</string>
 <key>NSDownloadsFolderUsageDescription</key><string>Lindo misura i metadati dell’area che scegli per la mappa e analizza i file locali per trovare file grandi e duplicati. Nessun file viene rimosso senza la tua conferma.</string>

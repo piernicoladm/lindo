@@ -21,9 +21,12 @@ class SourceExportTests(unittest.TestCase):
         self.repo.mkdir()
         for name in module.ROOT_FILES:
             (self.repo / name).write_text('synthetic source\n')
-        for folder in ('Sources/Lindo', 'Tests/LindoKitTests'):
+        for folder in ('src',):
             (self.repo / folder).mkdir(parents=True)
-            (self.repo / folder / 'Example.swift').write_text('// synthetic source\n')
+            (self.repo / folder / 'example.rs').write_text('// synthetic source\n')
+        icon = self.repo / module.BUNDLE_ICON
+        icon.parent.mkdir(parents=True)
+        icon.write_bytes((Path(__file__).resolve().parents[1] / module.BUNDLE_ICON).read_bytes())
         for name in module.TOOLS:
             path = self.repo / 'tools' / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -44,7 +47,7 @@ class SourceExportTests(unittest.TestCase):
     def test_allowlist_excludes_private_artifacts_and_history(self):
         for name in ('.git/config', '.env', '_HANDOFF.md', 'handover/release.zip',
                      'docs/qa/receipt.json', 'tools/ci/notarize-lindo.yml',
-                     'Sources/Lindo/private.pem', 'Sources/.git/private.swift', 'Icon/private-note.txt'):
+                     'src/private.pem', 'src/.git/private.rs', 'Icon/private-note.txt'):
             path = self.repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('PRIVATE SENTINEL')
@@ -70,7 +73,7 @@ class SourceExportTests(unittest.TestCase):
             self.assertEqual(archive.getinfo('Lindo/build.sh').external_attr >> 16 & 0o777, 0o755)
 
     def test_symlink_is_rejected_before_export(self):
-        source = self.repo / 'Sources/Lindo/Example.swift'
+        source = self.repo / 'src/example.rs'
         source.unlink()
         source.symlink_to(self.repo / 'LICENSE')
         with self.assertRaises(module.ExportError):
@@ -79,7 +82,7 @@ class SourceExportTests(unittest.TestCase):
 
     def test_suspected_secret_reports_only_filename_and_rule(self):
         secret = 'ghp_' + 'A' * 36
-        (self.repo / 'Sources/Lindo/Example.swift').write_text(secret)
+        (self.repo / 'src/example.rs').write_text(secret)
         with self.assertRaises(module.ExportError) as failure:
             module.export(self.repo, self.base / 'export')
         self.assertIn('github-token', str(failure.exception))
@@ -88,7 +91,7 @@ class SourceExportTests(unittest.TestCase):
 
     def test_personal_home_path_is_rejected(self):
         path = '/Users/' + 'private-person' + '/Documents/file'
-        (self.repo / 'Sources/Lindo/Example.swift').write_text(path)
+        (self.repo / 'src/example.rs').write_text(path)
         with self.assertRaises(module.ExportError) as failure:
             module.export(self.repo, self.base / 'export')
         self.assertNotIn(path, str(failure.exception))
