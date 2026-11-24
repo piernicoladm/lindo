@@ -379,10 +379,10 @@
       "sha256": "b39fa1e618d2236084ca9240440bb68348d7222ded744b6cdcb47341fee67a40"
     },
     {
-      "bytes": 7058,
+      "bytes": 7153,
       "mode": "0644",
       "path": "src/ui_navigation.rs",
-      "sha256": "c6b0bbec07e67bb5f03b93bbad443580af9f4e10d43c25aea6a4bb2fea7d8863"
+      "sha256": "2b1b8e1699145578286a04c1f9a31a35de5338ef47fb6871044675de69167970"
     },
     {
       "bytes": 32282,
@@ -397,10 +397,10 @@
       "sha256": "be63eb3166e71af6d3795ee554ae54abaeaec9254cb4bd2810a1c3a87daa0bf8"
     },
     {
-      "bytes": 45187,
+      "bytes": 45650,
       "mode": "0644",
       "path": "src/ui_results.rs",
-      "sha256": "f9532ddd3ab5856e2b41603b684cefc9a2813873bb0b1de82726d582e26365b8"
+      "sha256": "a22e2697988c0756e16ee195bf70f886ed2067f53ac58f326967dd71d60bae37"
     },
     {
       "bytes": 25995,

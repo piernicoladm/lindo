@@ -346,51 +346,46 @@ impl Lindo {
                 egui::pos2(panel.left(), panel.bottom() - footer_height),
                 panel.right_bottom(),
             );
-            ui.scope_builder(egui::UiBuilder::new().max_rect(footer), |ui| {
-                ui.separator();
-                ui.horizontal_wrapped(|ui| {
-                    let count = page.selected.len();
-                    ui.label(design::display(
-                        if count == 1 {
-                            "1 copia selezionata".to_owned()
-                        } else {
-                            format!("{} copie selezionate", number(count))
-                        },
-                        17.,
-                    ));
-                    if hidden > 0 {
-                        ui.small(format!("{} nascoste dal filtro", number(hidden)));
-                    }
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), 38.),
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if design::primary(
-                                ui,
-                                &format!("Rivedi {}", size(page.selected_bytes)),
-                                count > 0 && available,
-                            )
-                            .clicked()
-                            {
-                                self.review = Review::snapshot(page).map(|mut review| {
-                                    // The snapshot puts the protected copy first. Present the
-                                    // selected paths first while preserving each group's order.
-                                    let items = &review.data.report.items;
-                                    for group in review
-                                        .rows
-                                        .chunk_by_mut(|a, b| items[a.0].group == items[b.0].group)
-                                    {
-                                        let moving = group[1..].partition_point(|(_, keep)| !keep);
-                                        group[..=moving].rotate_left(1);
-                                    }
-                                    review
-                                });
-                                self.confirm = self.review.is_some();
-                            }
-                        },
-                    );
-                });
+            ui.painter().hline(
+                footer.x_range(),
+                footer.top(),
+                egui::Stroke::new(1.0_f32, design::LINE),
+            );
+            let actions = egui::Rect::from_min_max(
+                egui::pos2(footer.left(), footer.top() + 6.),
+                footer.right_bottom(),
+            );
+            let count = page.selected.len();
+            let summary = if count == 1 {
+                "1 copia selezionata".to_owned()
+            } else {
+                format!("{} copie selezionate", number(count))
+            };
+            let cta = format!("Rivedi {}", size(page.selected_bytes));
+            let mut left = action_cell(ui, actions, false, "selected", 168.);
+            left.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 1.;
+                ui.add(egui::Label::new(design::display(summary, 17.)).truncate());
+                if hidden > 0 {
+                    ui.small(format!("{} nascoste dal filtro", number(hidden)));
+                }
             });
+            let mut right = action_cell(ui, actions, true, "review", 168.);
+            if design::primary(&mut right, &cta, count > 0 && available).clicked() {
+                self.review = Review::snapshot(page).map(|mut review| {
+                    // Keep source paths adjacent to retained paths in every group.
+                    let items = &review.data.report.items;
+                    for group in review
+                        .rows
+                        .chunk_by_mut(|a, b| items[a.0].group == items[b.0].group)
+                    {
+                        let moving = group[1..].partition_point(|(_, keep)| !keep);
+                        group[..=moving].rotate_left(1);
+                    }
+                    review
+                });
+                self.confirm = self.review.is_some();
+            }
             if let Some(path) = reveal {
                 self.reveal(path, ctx);
             }
@@ -606,13 +601,12 @@ impl Lindo {
             ui.add_space(8.);
             ui.label("Lo spazio si libera quando svuoti il Cestino.");
             ui.add_space(14.);
-            ui.horizontal_wrapped(|ui| {
-                back = ui.add_sized([92., 36.], egui::Button::new("Indietro")).clicked();
-                ui.allocate_ui_with_layout(egui::vec2(ui.available_width(),38.), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let action = if self.confirm { "Sposta nel Cestino" } else { "Continua" };
-                    next = design::primary(ui, action, self.available()).clicked();
-                });
-            });
+            let (actions,_) = ui.allocate_exact_size(egui::vec2(ui.available_width(),38.),egui::Sense::hover());
+            let mut left=action_cell(ui,actions,false,"back",170.);
+            back=left.add_sized([left.available_width().min(92.),36.],egui::Button::new("Indietro")).clicked();
+            let mut right=action_cell(ui,actions,true,"confirm",170.);
+            let action=if self.confirm {"Sposta nel Cestino"} else {"Continua"};
+            next=design::primary(&mut right,action,self.available()).clicked();
         });
         if back || response.should_close() {
             if self.confirm && !direct {
@@ -1028,4 +1022,32 @@ fn number(value: impl ToString) -> String {
         result.push(ch);
     }
     result
+}
+
+// Fixed sibling cells keep the action and summary on one baseline. Neither
+// child's content can advance the parent's cursor or wrap the other cell.
+fn action_cell(
+    parent: &mut egui::Ui,
+    row: egui::Rect,
+    right: bool,
+    id: &str,
+    right_width: f32,
+) -> egui::Ui {
+    let split = row.right() - right_width.min(row.width() * 0.62);
+    let mut rect = row;
+    let layout = if right {
+        rect.min.x = split;
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        rect.max.x = (split - 6.).max(rect.left());
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    let mut cell = parent.new_child(
+        egui::UiBuilder::new()
+            .id_salt(id)
+            .max_rect(rect)
+            .layout(layout),
+    );
+    cell.set_clip_rect(parent.clip_rect().intersect(rect));
+    cell
 }

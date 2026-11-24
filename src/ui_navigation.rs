@@ -150,7 +150,8 @@ impl Lindo {
                             bottom: 4,
                         }),
                 );
-                let glass = egui::pos2(query.rect.left() + 12., query.rect.center().y - 1.);
+                // TextEdit exposes its inner text rect. Draw the glass in the leading margin.
+                let glass = egui::pos2(query.rect.left() - 15., query.rect.center().y - 1.);
                 let stroke = egui::Stroke::new(1.35_f32, design::MUTED);
                 ui.painter().circle_stroke(glass, 4.2, stroke);
                 ui.painter().line_segment(
