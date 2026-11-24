@@ -73,7 +73,7 @@ fn finder_move(item: &Candidate, cancel: &AtomicBool) -> Result<Option<PathBuf>,
     if !item.identity.matches(&item.path) {
         return Err("File cambiato prima di contattare Finder.".into());
     }
-    let output = command::run(
+    let output = command::run_stdout(
         "/usr/bin/osascript",
         &["-e", FINDER_TRASH, &reference, path],
         None,

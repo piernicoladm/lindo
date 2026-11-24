@@ -232,7 +232,7 @@ impl Scan<'_> {
             cloud: ubiquitous || policy::cloud(path),
         });
     }
-    fn tree(&mut self, path: &Path, apps: bool, node_before: Node) {
+    fn tree(&mut self, path: &Path, apps: bool, node_before: Node, ubiquitous: bool) {
         // A unit may appear both beneath a requested root and as an explicit root.
         if !self.directories.insert(node_before) {
             return;
@@ -284,7 +284,7 @@ impl Scan<'_> {
                     bytes,
                     identity: id,
                     group: None,
-                    cloud: policy::cloud(path),
+                    cloud: ubiquitous || policy::cloud(path),
                 });
             }
             Err(e) => self.error(path, e),
@@ -415,7 +415,7 @@ impl Scan<'_> {
                 if self.req.mode == Mode::Apps
                     && p.extension().is_some_and(|s| s.eq_ignore_ascii_case("app"))
                 {
-                    self.tree(&p, true, node(&s));
+                    self.tree(&p, true, node(&s), ubiquitous);
                     continue;
                 }
                 if self.req.mode == Mode::Cache {
@@ -424,7 +424,7 @@ impl Scan<'_> {
                         continue;
                     }
                     if policy::cache_owner(&p).is_some() {
-                        self.tree(&p, false, node(&s));
+                        self.tree(&p, false, node(&s), ubiquitous);
                         continue;
                     }
                     if !policy::cache_branch(&p) {
@@ -625,8 +625,8 @@ pub fn run(req: &Request, stop: &AtomicBool, progress: &Progress) -> Report {
             );
             continue;
         }
-        let metadata = match policy::open_file(root, libc::O_EVTONLY | libc::O_DIRECTORY)
-            .and_then(|f| f.metadata())
+        let (handle, metadata) = match policy::open_file(root, libc::O_EVTONLY | libc::O_DIRECTORY)
+            .and_then(|file| file.metadata().map(|m| (file, m)))
         {
             Ok(m) => m,
             Err(e) => {
@@ -635,10 +635,11 @@ pub fn run(req: &Request, stop: &AtomicBool, progress: &Progress) -> Report {
             }
         };
         let mut safe = true;
+        let mut root_ubiquitous = false;
         for ancestor in root.ancestors() {
-            match policy::local_path(ancestor) {
-                Ok(true) => {}
-                Ok(false) => {
+            match policy::local_provider_state(ancestor) {
+                Ok((true, ubiquitous)) => root_ubiquitous |= ubiquitous,
+                Ok((false, _)) => {
                     safe = false;
                     scan.report.skipped += 1;
                     break;
@@ -660,9 +661,23 @@ pub fn run(req: &Request, stop: &AtomicBool, progress: &Progress) -> Report {
         }
         let root_node = (metadata.dev(), metadata.ino());
         if req.mode == Mode::Cache && policy::cache_owner(root).is_some() {
-            scan.tree(root, false, root_node);
+            scan.tree(root, false, root_node, root_ubiquitous);
         } else {
-            scan.walk(root, 0, Some(root_node));
+            let observed = scan.walk(root, 0, Some(root_node));
+            if req.mode == Mode::Space && req.roots.len() == 1 && !stop.load(Ordering::Relaxed) {
+                let stamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default();
+                scan.report.measurement = Some(crate::model::FolderMeasurement {
+                    root: root_node,
+                    observed,
+                    volume_free: policy::volume_available(&handle).ok(),
+                    measured_at: crate::model::local_timestamp(stamp.as_secs() as libc::time_t)
+                        .unwrap_or_else(|| "orario non disponibile".to_owned()),
+                    skipped: scan.report.skipped,
+                    errors: scan.report.errors,
+                });
+            }
         }
     }
     if req.mode == Mode::Duplicates && cancelled(stop).is_ok() {
@@ -671,7 +686,8 @@ pub fn run(req: &Request, stop: &AtomicBool, progress: &Progress) -> Report {
     scan.report.cancelled = stop.load(Ordering::Relaxed);
     if scan.report.cancelled {
         scan.report.items.clear();
-        scan.report.space.clear()
+        scan.report.space.clear();
+        scan.report.measurement = None;
     }
     scan.report
 }
@@ -680,6 +696,36 @@ pub fn run(req: &Request, stop: &AtomicBool, progress: &Progress) -> Report {
 mod tests {
     use super::*;
     use std::{fs, os::unix::fs::symlink, process::Command};
+
+    #[test]
+    fn tree_preserves_ubiquitous_flag_outside_known_provider_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().canonicalize().unwrap();
+        fs::write(path.join("entry.txt"), b"local fixture").unwrap();
+        let _guard = policy::LocalOnly::enter().unwrap();
+        let req = Request {
+            mode: Mode::Cache,
+            roots: vec![path.clone()],
+            min_bytes: 0,
+        };
+        let progress = Progress::default();
+        let stop = AtomicBool::new(false);
+        let mut scan = Scan {
+            req: &req,
+            stop: &stop,
+            progress: &progress,
+            report: Report::default(),
+            directories: HashSet::new(),
+            hardlinks: HashSet::new(),
+            cutoff: 0,
+            next_directory_sample: std::time::Instant::now(),
+            space_totals: SpaceStats::default(),
+        };
+        let m = fs::metadata(&path).unwrap();
+        scan.tree(&path, false, (m.dev(), m.ino()), true);
+        assert_eq!(scan.report.items.len(), 1, "{:?}", scan.report.notes);
+        assert!(scan.report.items[0].cloud);
+    }
 
     #[test]
     fn pinned_keeper_group_is_atomic_on_change_or_cancellation() {
@@ -851,6 +897,19 @@ mod tests {
         )
         .unwrap());
         let map = scan(Mode::Space, &base);
+        let measure = map
+            .measurement
+            .as_ref()
+            .expect("single root map measurement");
+        let root_meta = fs::metadata(&base).unwrap();
+        assert_eq!(measure.root, (root_meta.dev(), root_meta.ino()));
+        assert_eq!(
+            measure.observed,
+            map.items.iter().map(|item| item.bytes).sum::<u64>()
+        );
+        assert!(measure.volume_free.is_some());
+        assert!(!measure.measured_at.is_empty());
+        assert_eq!((measure.errors, measure.skipped), (map.errors, map.skipped));
         assert!(map.items.iter().any(|i| i.path.ends_with(".hidden")));
         assert_eq!(
             map.space[&base.join(".hidden")].logical_bytes,

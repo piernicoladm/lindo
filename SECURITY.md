@@ -16,7 +16,7 @@ L’alleggerimento usa una copia privata sullo stesso volume. Ricontrolla bundle
 
 ## Operazioni online e irreversibili
 
-Svuota Cestino chiede una conferma separata e usa Finder. Lo svuotamento può interessare più volumi montati. La rimozione di uno snapshot locale perde quel punto di ripristino. Per Mail e i provider cloud una modifica può sincronizzarsi con altri dispositivi. Archivi cloud rivalida identità e metadati del singolo file immediatamente prima della richiesta al provider. Conservazione, quota e tempi di ripristino dipendono dal servizio. Nel Finder “Rimuovi download” riguarda la copia locale.
+Svuota Cestino chiede una conferma separata e usa Finder. Lo svuotamento può interessare più volumi montati. La rimozione di uno snapshot locale perde quel punto di ripristino. In Revisioni documento una conferma separata rimuove definitivamente la sola revisione storica scelta e conserva la versione corrente. Per Mail e i provider cloud una modifica può sincronizzarsi con altri dispositivi. Archivi cloud rivalida identità e metadati del singolo file immediatamente prima della richiesta al provider. Conservazione, quota e tempi di ripristino dipendono dal servizio. Nel Finder “Rimuovi download” riguarda la copia locale.
 
 ## Limiti dichiarati
 

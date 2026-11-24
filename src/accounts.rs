@@ -96,7 +96,7 @@ function run(argv) {
             throw Error("Un messaggio è cambiato. Ripeti la scansione.");
         targets.push(found[0]);
     }
-    let moved=0, verified=0;
+    let attempted=0, moved=0, verified=0;
     for (let i=0;i<targets.length;++i) {
         try {
             const row=input.rows[i], dest=destinations[0];
@@ -107,16 +107,16 @@ function run(argv) {
             if (before.length!==1 || String(before[0].messageId())!==row.mid)
                 throw Error("Il messaggio è cambiato.");
             const existing=dest.messages.whose({messageId:row.mid})().length;
-            app.move(before[0],{to:dest}); ++moved;
+            ++attempted; app.move(before[0],{to:dest}); ++moved;
             // Mail may assign a new local id in Trash. Verify the original local
             // id disappeared and the RFC Message-ID count increased in this account.
             if (box.messages.whose({id:row.id})().some(m=>String(m.messageId())===row.mid) ||
                 String(dest.account().id())!==accountID || dest.messages.whose({messageId:row.mid})().length!==existing+1)
                 throw Error("Mail non ha ancora confermato il trasferimento in questa casella. Controlla il Cestino.");
             ++verified;
-        } catch(e) {return JSON.stringify({moved,verified,total:targets.length,error:String(e)});}
+        } catch(e) {return JSON.stringify({attempted,moved,verified,total:targets.length,error:String(e)});}
     }
-    return JSON.stringify({moved,verified,total:targets.length});
+    return JSON.stringify({attempted,moved,verified,total:targets.length});
 }
 "#;
 
@@ -150,7 +150,7 @@ fn automation(
     input: Option<File>,
     stop: &AtomicBool,
 ) -> Result<Value, String> {
-    let r = command::run(
+    let r = command::run_stdout(
         "/usr/bin/osascript",
         &["-l", "JavaScript", "-e", script, "--", operation],
         input,
@@ -338,6 +338,26 @@ fn cloud_scan(root: PathBuf, stop: &AtomicBool) -> Result<Cloud, String> {
         status,
     })
 }
+fn mail_move_receipt(reply: Value, total: usize) -> Result<String, String> {
+    let invalid = "Esito incerto. Controlla la casella originale e il Cestino in Mail.";
+    let attempted = reply["attempted"].as_u64().ok_or(invalid)?;
+    let moved = reply["moved"].as_u64().ok_or(invalid)?;
+    let verified = reply["verified"].as_u64().ok_or(invalid)?;
+    if reply["total"].as_u64() != Some(total as u64)
+        || attempted > total as u64
+        || moved > attempted
+        || verified > moved
+    {
+        return Err(invalid.into());
+    }
+    let pending = attempted - verified;
+    let skipped = total as u64 - attempted;
+    let reason = reply["error"].as_str().unwrap_or("");
+    Ok(format!(
+        "{verified} di {total} messaggi verificati nel Cestino. {pending} trasferimenti incerti. {skipped} non avviati. {reason}"
+    ))
+}
+
 enum Reply {
     Mail(Mailbox),
     Cloud(Cloud),
@@ -377,6 +397,8 @@ pub(crate) struct Accounts {
     selected: HashSet<usize>,
     review: Option<Vec<usize>>,
     notice: String,
+    mail_refresh: Option<Value>,
+    cloud_refresh: Option<PathBuf>,
 }
 impl Accounts {
     fn reset(&mut self) {
@@ -389,6 +411,8 @@ impl Accounts {
         self.review.take();
         self.selected.clear();
         self.notice.clear();
+        self.mail_refresh = None;
+        self.cloud_refresh = None;
     }
     fn work(
         &mut self,
@@ -409,12 +433,30 @@ impl Accounts {
             ctx.request_repaint();
         });
     }
+    fn refresh_after_action(&mut self, ctx: &egui::Context) {
+        if let Some(page) = self.mail_refresh.take() {
+            self.work(ctx, false, move |stop| {
+                parse_mail(automation(
+                    MAIL_SCRIPT,
+                    "page",
+                    Some(json_input(&page)?),
+                    stop,
+                )?)
+                .map(Reply::Mail)
+            });
+        } else if let Some(root) = self.cloud_refresh.take() {
+            self.work(ctx, false, move |stop| {
+                cloud_scan(root, stop).map(Reply::Cloud)
+            });
+        }
+    }
     fn poll(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let Some(job) = &self.job else {
             return;
         };
         match job.rx.try_recv() {
             Ok(result) => {
+                let job_mutation = job.mutation;
                 self.job.take();
                 match result {
                     Ok(Reply::Mail(m)) => self.mail = Some(m),
@@ -422,8 +464,13 @@ impl Accounts {
                     Ok(Reply::Copies(c)) => self.copies = Some(c),
                     Ok(Reply::Tabs(t)) => self.tabs = Some(t),
                     Ok(Reply::Action(s)) => self.notice = s,
+                    Err(e) if !self.notice.is_empty() && !job_mutation => {
+                        self.notice
+                            .push_str(&format!(" Aggiornamento incompleto. {e}"));
+                    }
                     Err(e) => self.notice = e,
                 }
+                self.refresh_after_action(ctx);
             }
             Err(mpsc::TryRecvError::Empty) => {
                 ctx.request_repaint_after(Duration::from_millis(160));
@@ -436,7 +483,9 @@ impl Accounts {
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.job.take();
-                self.notice = "Operazione interrotta. Controlla il risultato nel client.".into();
+                self.notice
+                    .push_str(" Operazione interrotta. Controlla il risultato nel client.");
+                self.refresh_after_action(ctx);
             }
         }
     }
@@ -515,21 +564,16 @@ impl Accounts {
                     serde_json::json!({"id":m.id,"mid":m.mid})
                 })
                 .collect();
+            self.mail_refresh = Some(
+                serde_json::json!({"accountID":mail.account,"boxName":mail.name,"offset":mail.offset}),
+            );
             let payload =
                 serde_json::json!({"accountID":mail.account,"boxName":mail.name,"rows":rows});
             self.selected.clear();
             self.work(ctx, true, move |stop| {
                 let reply = automation(MAIL_SCRIPT, "move", Some(json_input(&payload)?), stop)
                     .map_err(|e| format!("Verifica l’esito in Mail prima di riprovare. {e}"))?;
-                let moved = reply["moved"]
-                    .as_u64()
-                    .ok_or("Esito di Mail sconosciuto.")?;
-                let verified = reply["verified"].as_u64().ok_or("Verifica del Cestino sconosciuta.")?;
-                Ok(Reply::Action(format!(
-                    "Mail ha spostato {moved} di {} messaggi. {verified} verificati nel Cestino dell’account. {}",
-                    rows.len(),
-                    reply["error"].as_str().unwrap_or("")
-                )))
+                mail_move_receipt(reply, rows.len()).map(Reply::Action)
             });
         } else if let Some(c) = self.copies.take() {
             self.selected.clear();
@@ -540,6 +584,7 @@ impl Accounts {
             self.selected.clear();
             self.work(ctx, true, move |stop| browser::close(t, indices, stop));
         } else if let Some(c) = self.cloud.take() {
+            self.cloud_refresh = Some(c.root.clone());
             let items: Vec<_> = indices.into_iter().map(|i| c.items[i].clone()).collect();
             self.selected.clear();
             self.work(ctx, true, move |stop| {
@@ -933,6 +978,19 @@ function fixtureApp() {
         move:(m,{to})=>{if(m!==message || to!==dest) throw Error("Wrong target"); messages.splice(messages.indexOf(m),1); trash.push(m);}};
 }
 "#;
+    #[test]
+    fn partial_mail_move_reports_only_verified_transfers() {
+        let reply = json!({"total":3, "attempted":2, "moved":1, "verified":1, "error":"Fixture"});
+        let notice = mail_move_receipt(reply, 3).unwrap();
+        assert!(notice.contains("1 di 3 messaggi verificati"));
+        assert!(notice.contains("1 trasferimenti incerti"));
+        assert!(notice.contains("1 non avviati"));
+        assert!(mail_move_receipt(
+            json!({"total":2, "attempted":1, "moved":1, "verified":2}),
+            2
+        )
+        .is_err());
+    }
     #[test]
     fn apple_mail_fixture_scans_and_moves_only_matching_messages() {
         let script = format!(

@@ -2,7 +2,7 @@
 
 Lindo mostra quali file e cartelle occupano più spazio sul Mac e trova i duplicati esatti confrontando i file byte per byte. La scansione avviene sul Mac, nelle cartelle che scegli. Per ogni gruppo di duplicati puoi confrontare i percorsi, scegliere la copia da conservare e rivedere le altre prima di spostarle nel Cestino.
 
-Lindo 0.9.2 richiede **macOS 26 o successivo su Apple Silicon**. Il codice è scritto in Rust e distribuito con [licenza MIT](LICENSE).
+Lindo 0.9.3 richiede **macOS 26 o successivo su Apple Silicon**. Il codice è scritto in Rust e distribuito con [licenza MIT](LICENSE).
 
 ## Avvio rapido dal sorgente
 
@@ -38,7 +38,7 @@ Il dettaglio dei provider, dei limiti e delle verifiche è in [FEATURES.md](FEAT
 
 ## Prima di rimuovere qualcosa
 
-Controlla sempre percorsi e copia conservata. Sulle cartelle sincronizzate, il Cestino può propagare la rimozione agli altri dispositivi e alle persone con cui condividi i file. Lo spazio recuperabile può differire dalla dimensione indicata, ad esempio con cloni APFS, compressione e hard link. Lindo mostra le scansioni interrotte o incomplete.
+Controlla sempre percorsi e copia conservata. Sulle cartelle sincronizzate, il Cestino può propagare la rimozione agli altri dispositivi e alle persone con cui condividi i file. La revisione mostra la dimensione selezionata e, per i file, una stima basata sui blocchi allocati dopo lo svuotamento. Un file con più hard link contribuisce alla stima una sola volta, quando sono selezionati tutti i suoi nomi. Cloni APFS e snapshot possono ridurre lo spazio effettivamente liberato. Per le selezioni che comprendono cartelle la stima complessiva è indicata come indisponibile. Lindo mostra le scansioni interrotte o incomplete.
 
 Il Cestino rimane un'operazione non atomica rispetto alle verifiche precedenti. File Provider, volumi esterni e filesystem di rete richiedono verifiche sul dispositivo: i test sintetici non dimostrano ogni possibile comportamento del sistema. Le protezioni e i limiti sono descritti in [SECURITY.md](SECURITY.md).
 

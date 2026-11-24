@@ -142,16 +142,19 @@ pub(crate) fn placeholder_name(path: &Path) -> bool {
     path.file_name()
         .is_some_and(|s| s.as_bytes().ends_with(b".icloud"))
 }
-pub fn local_path(path: &Path) -> io::Result<bool> {
+pub(crate) fn local_provider_state(path: &Path) -> io::Result<(bool, bool)> {
     use std::os::macos::fs::MetadataExt;
     if placeholder_name(path) {
-        return Ok(false);
+        return Ok((false, false));
     }
     let m = open_file(path, libc::O_EVTONLY)?.metadata()?;
     if m.st_flags() & 0x40000000 != 0 {
-        return Ok(false);
+        return Ok((false, false));
     }
-    provider_state(path, m.is_dir()).map(|(local, _)| local)
+    provider_state(path, m.is_dir())
+}
+pub fn local_path(path: &Path) -> io::Result<bool> {
+    local_provider_state(path).map(|(local, _)| local)
 }
 pub fn package(path: &Path) -> bool {
     let ext = path
@@ -220,6 +223,15 @@ pub fn protected(path: &Path, mode: Mode, app_root: Option<&Path>) -> bool {
             .iter()
             .any(|p| Path::new(&folded).starts_with(p))
 }
+pub(crate) fn volume_available(dir: &File) -> io::Result<u64> {
+    use std::os::fd::AsRawFd;
+    let mut st = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    if unsafe { libc::fstatfs(dir.as_raw_fd(), st.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let st = unsafe { st.assume_init() };
+    Ok(st.f_bavail.saturating_mul(st.f_bsize as u64))
+}
 pub(crate) fn home() -> PathBuf {
     #[cfg(test)]
     if let Some(fixture) = std::env::var_os("LINDO_FIXTURE_WORKER") {
@@ -230,10 +242,44 @@ pub(crate) fn home() -> PathBuf {
         .unwrap_or_default()
 }
 pub(crate) fn cloud(path: &Path) -> bool {
-    let h = home();
-    path.starts_with(h.join("Library/CloudStorage"))
-        || path.starts_with(h.join("Library/Mobile Documents"))
+    cloud_under_home(path, &home())
 }
+
+fn cloud_under_home(path: &Path, home: &Path) -> bool {
+    if !home.is_absolute() || !path.is_absolute() {
+        return false;
+    }
+    let mut parts = path.iter().map(OsStrExt::as_bytes);
+    if !home.iter().all(|part| {
+        parts
+            .next()
+            .is_some_and(|p| p.eq_ignore_ascii_case(part.as_bytes()))
+    }) {
+        return false;
+    }
+    let Some(first) = parts.next() else {
+        return false;
+    };
+    if first.eq_ignore_ascii_case(b"library") {
+        return parts.next().is_some_and(|dir| {
+            dir.eq_ignore_ascii_case(b"cloudstorage")
+                || dir.eq_ignore_ascii_case(b"mobile documents")
+        });
+    }
+    [
+        b"dropbox".as_slice(),
+        b"onedrive",
+        b"google drive",
+        b"googledrive",
+    ]
+    .iter()
+    .any(|provider| {
+        first.eq_ignore_ascii_case(provider)
+            || (first.get(provider.len()) == Some(&b'-')
+                && first[..provider.len()].eq_ignore_ascii_case(provider))
+    })
+}
+
 pub fn allowed_root(mode: Mode, path: &Path) -> bool {
     let home = home();
     if !home.is_absolute()
@@ -421,6 +467,74 @@ impl Iterator for Directory {
                     return Some(Ok(std::ffi::OsString::from_vec(bytes.to_vec())));
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod location_tests {
+    use super::*;
+
+    #[test]
+    fn reviewed_file_location_preserves_mail_and_logs_and_rejects_bundles_and_self() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let guard = LocalOnly::enter().unwrap();
+        let mut fixtures = vec![(exe, false)];
+        for (dir, allowed) in [
+            (
+                "Library/Containers/com.apple.mail/Data/Library/Mail Downloads",
+                true,
+            ),
+            ("Library/Logs/Sample", true),
+            ("My.app/Contents/Resources", false),
+        ] {
+            let parent = base.join(dir);
+            std::fs::create_dir_all(&parent).unwrap();
+            let file = parent.join("entry.txt");
+            std::fs::write(&file, b"fixture").unwrap();
+            fixtures.push((file, allowed));
+        }
+        for (path, allowed) in fixtures {
+            assert!(local_path(&path).unwrap());
+            let identity = crate::trash::Identity::read(&path).unwrap();
+            let mut reached_feature = false;
+            let result = crate::trash::move_reviewed_file(&path, &identity, |_| {
+                reached_feature = true;
+                Err("Synthetic feature veto".into())
+            });
+            assert!(result.is_err());
+            assert_eq!(reached_feature, allowed, "{}", path.display());
+            assert!(path.exists());
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn cloud_roots_use_complete_case_insensitive_home_components() {
+        let home = Path::new("/Users/demo");
+        for rel in [
+            "lIbRaRy/cLoUdStOrAgE/Service/file",
+            "Library/mobile documents/x",
+            "Dropbox-Team/file",
+            "oNeDrIvE/file",
+            "Google Drive/file",
+            "GoogleDrive-Team/file",
+        ] {
+            assert!(cloud_under_home(
+                &Path::new("/users/fixture").join(rel),
+                home
+            ));
+        }
+        for path in [
+            "/Users/demo/Library/CloudStorage Backup/x",
+            "/Users/demo/Documents/Dropbox/x",
+            "/Users/demo/DropboxNotes/x",
+            "/Users/demolition/Dropbox/x",
+            "/Volumes/Test/OneDrive/x",
+        ] {
+            assert!(!cloud_under_home(Path::new(path), home));
         }
     }
 }

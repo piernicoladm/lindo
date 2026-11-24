@@ -125,7 +125,7 @@ fn invoke(
     } else {
         None
     };
-    let out = command::run(
+    let out = command::run_stdout(
         "/usr/bin/osascript",
         &["-l", "JavaScript", "-e", script, "--", operation],
         file,
@@ -232,6 +232,8 @@ pub(crate) struct MailTrash {
     chosen: BTreeSet<usize>,
     review: bool,
     receipt: Option<Value>,
+    refresh_page: Option<Value>,
+    action_notice: String,
     worker: Option<Worker>,
     status: String,
 }
@@ -285,24 +287,35 @@ impl MailTrash {
                         }
                         Ok(Outcome::Highlight(n, receipt)) => {
                             self.receipt = Some(receipt);
-                            self.status = format!(
+                            self.action_notice = format!(
                                 "{n} messaggi selezionati nella finestra di Mail. Controlla la selezione prima di usare Elimina in Mail."
-                            )
+                            );
+                            self.status.clear();
                         }
                         Ok(Outcome::Verified {
                             present,
                             absent,
                             ambiguous,
                         }) => {
-                            self.status = format!(
+                            self.action_notice = format!(
                                 "Nel Cestino selezionato · {present} ancora presenti · {absent} assenti · {ambiguous} incerti. La verifica riguarda questa casella sul Mac."
-                            )
+                            );
+                            if let Some(page) = self.refresh_page.take() {
+                                self.load(ctx, Some(page));
+                            }
                         }
                         Err(e) => {
                             self.preview = None;
                             self.chosen.clear();
                             self.review = false;
-                            self.status = e;
+                            if let Some(page) = self.refresh_page.take() {
+                                self.action_notice = format!(
+                                    "Esito non confermato. Controlla la selezione in Mail. {e}"
+                                );
+                                self.load(ctx, Some(page));
+                            } else {
+                                self.status = e;
+                            }
                         }
                     }
                 }
@@ -311,8 +324,16 @@ impl MailTrash {
                     self.worker = None;
                     self.preview = None;
                     self.status = "Consultazione interrotta.".into();
+                    if let Some(page) = self.refresh_page.take() {
+                        self.action_notice =
+                            "Esito non confermato. Controlla la selezione in Mail.".into();
+                        self.load(ctx, Some(page));
+                    }
                 }
             }
+        }
+        if !self.action_notice.is_empty() {
+            ui.label(&self.action_notice);
         }
         ui.label(&self.status);
         if self.worker.is_some() {
@@ -332,8 +353,10 @@ impl MailTrash {
                     let present = read("present")?;
                     let absent = read("absent")?;
                     let ambiguous = read("ambiguous")?;
-                    if present + absent + ambiguous
-                        != receipt["rows"].as_array().ok_or("Esito incompleto.")?.len() as u64
+                    if present
+                        .checked_add(absent)
+                        .and_then(|n| n.checked_add(ambiguous))
+                        != Some(receipt["rows"].as_array().ok_or("Esito incompleto.")?.len() as u64)
                     {
                         return Err("Esito incompleto.".into());
                     }
@@ -350,6 +373,8 @@ impl MailTrash {
             .button("Consulta il Cestino selezionato in Mail")
             .clicked()
         {
+            self.refresh_page = None;
+            self.action_notice.clear();
             self.load(ctx, None);
             return;
         }
@@ -378,6 +403,8 @@ impl MailTrash {
                 let n = rows.len();
                 let receipt =
                     json!({"key":p.key,"rows":rows,"accountName":p.account,"boxName":p.box_name});
+                self.refresh_page = Some(json!({"key":p.key,"offset":p.offset}));
+                self.action_notice.clear();
                 self.receipt = None;
                 self.preview = None;
                 self.review = false;

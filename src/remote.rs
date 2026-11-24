@@ -112,16 +112,16 @@ fn execute(args: &[String], stop: &AtomicBool) -> Result<String, String> {
         "--log-level",
         "ERROR",
     ]);
-    let result = command::run(&binary()?, &argv, None, stop, 90)?;
-    if result.truncated {
-        return Err("Elenco troppo ampio. Inserisci un prefisso più specifico e aggiorna.".into());
-    }
+    let result = command::run_stdout(&binary()?, &argv, None, stop, 90)?;
     if result.code != Some(0) {
         return Err(format!(
             "rclone non ha completato {} (codice {}). Verifica la connessione e l’account.",
             args[0],
             result.code.unwrap_or(-1)
         ));
+    }
+    if result.truncated {
+        return Err("Elenco troppo ampio. Inserisci un prefisso più specifico e aggiorna.".into());
     }
     Ok(result.text)
 }
@@ -217,21 +217,35 @@ fn list(
     options(account, &mut args);
     let response = json(call, &args)?;
     let mut rows = Vec::new();
+    let folded_filter = filter.to_lowercase();
     for item in response.as_array().ok_or("Elenco remoto incompleto.")? {
         if item["Path"] != item["Name"] {
             return Err("Il provider ha restituito un percorso inatteso.".into());
         }
-        if let Some(row) = parse_entry(item) {
-            if safe_path(&join(parent, &row.name))
-                && (filter.is_empty()
-                    || if exact {
-                        row.name.to_lowercase() == filter.to_lowercase()
-                    } else {
-                        row.name.to_lowercase().starts_with(&filter.to_lowercase())
-                    })
-            {
-                rows.push(row);
+        let Some(name) = item["Name"].as_str() else {
+            if exact {
+                return Err("Nome remoto non verificabile.".into());
             }
+            continue;
+        };
+        let folded_name = name.to_lowercase();
+        let matches = if exact {
+            folded_name == folded_filter
+        } else {
+            folded_name.starts_with(&folded_filter)
+        };
+        if !matches {
+            continue;
+        }
+        let entry = parse_entry(item).filter(|row| safe_path(&join(parent, &row.name)));
+        if exact
+            && (entry.as_ref().is_none_or(|row| !row.identified())
+                || item.get("OrigID").is_some_and(|id| !id.is_string()))
+        {
+            return Err("Il provider ha restituito un’identità incompleta o ambigua.".into());
+        }
+        if let Some(row) = entry {
+            rows.push(row);
         }
     }
     rows.sort_by(|a, b| {
@@ -313,8 +327,10 @@ fn remove(
     trail: &[Entry],
     selected: &[Entry],
 ) -> Result<String, String> {
-    let folder = preflight(call, account, trail, selected)?;
+    let folder = preflight(call, account, trail, selected)
+        .map_err(|e| format!("Operazione non avviata. {e}"))?;
     for (done, row) in selected.iter().enumerate() {
+        let mut requested = false;
         let action = (|| {
             verify_chain(call, account, trail)?;
             let mut args = vec![
@@ -329,15 +345,22 @@ fn remove(
                 _ => return Err("Cestino non verificato per questo provider.".into()),
             }
             unique(call, account, &folder, row)?;
+            requested = true;
             call(&args)?;
             if !list(call, account, &folder, &row.name, true, 0)?.is_empty() {
                 return Err("Il nome è ancora presente nella cartella originale.".into());
             }
+            verify_chain(call, account, trail)?;
             Ok::<(), String>(())
         })();
         if let Err(error) = action {
+            let state = if requested {
+                "Rimozione incerta"
+            } else {
+                "Rimozione non avviata"
+            };
             return Err(format!(
-                "{done} rimozioni verificate. Verifica «{}» nella cartella e tra i file eliminati prima di riprovare. {error}",
+                "{done} rimozioni verificate. {state} per «{}». Controlla il file nella cartella e tra i file eliminati prima di riprovare. {error}",
                 row.name
             ));
         }
@@ -365,19 +388,27 @@ fn relocate(
     {
         return Err("Selezione o destinazione non valida.".into());
     }
-    let folder = preflight(call, account, trail, selected)?;
-    if !list(call, account, "", destination, true, 0)?.is_empty() {
-        return Err("La cartella di destinazione esiste già.".into());
+    let folder = preflight(call, account, trail, selected)
+        .map_err(|e| format!("Operazione non avviata. {e}"))?;
+    if !list(call, account, "", destination, true, 0)
+        .map_err(|e| format!("Spostamento non avviato. Destinazione non verificabile. {e}"))?
+        .is_empty()
+    {
+        return Err("Spostamento non avviato. La cartella di destinazione esiste già.".into());
     }
     let mut mkdir = vec!["mkdir".into(), target(account, destination)?];
     options(account, &mut mkdir);
-    call(&mkdir)?;
-    let dirs = list(call, account, "", destination, true, 0)?;
+    call(&mkdir)
+        .map_err(|e| format!("Creazione di «{destination}» incerta. Nessun file spostato. {e}"))?;
+    let dirs = list(call, account, "", destination, true, 0).map_err(|e| {
+        format!("Identità di «{destination}» non verificata. Nessun file spostato. {e}")
+    })?;
     if dirs.len() != 1 || !dirs[0].directory || !dirs[0].identified() {
         return Err("Destinazione creata ma non identificabile. Verificala nel cloud.".into());
     }
     let mut done = 0;
     for row in selected {
+        let mut requested = false;
         let action = (|| {
             verify_chain(call, account, trail)?;
             unique(call, account, "", &dirs[0])?;
@@ -393,16 +424,24 @@ fn relocate(
                 "--ignore-existing".into(),
             ];
             options(account, &mut args);
+            requested = true;
             call(&args)?;
             unique(call, account, destination, row)?;
             if !list(call, account, &folder, &row.name, true, 0)?.is_empty() {
                 return Err("La verifica della posizione originale è incompleta.".into());
             }
+            verify_chain(call, account, trail)?;
+            unique(call, account, "", &dirs[0])?;
             Ok::<(), String>(())
         })();
         if let Err(e) = action {
+            let state = if requested {
+                "Spostamento incerto"
+            } else {
+                "Spostamento non avviato"
+            };
             return Err(format!(
-                "{done} file verificati in {destination}. Verifica la posizione di «{}» prima di riprovare. {e}",
+                "{done} file verificati in {destination}. {state} per «{}». Verifica la posizione prima di riprovare. {e}",
                 row.name
             ));
         }
@@ -417,7 +456,7 @@ fn relocate(
 enum Outcome {
     Accounts(Vec<Account>),
     Listing(Vec<Entry>, String),
-    Moved(String),
+    Mutation(Result<String, String>),
 }
 struct Job {
     stop: Arc<AtomicBool>,
@@ -436,6 +475,8 @@ pub(crate) struct Remote {
     status: String,
     review: Option<Review>,
     job: Option<Job>,
+    mutation_pending: bool,
+    mutation_notice: String,
 }
 impl Drop for Remote {
     fn drop(&mut self) {
@@ -466,6 +507,7 @@ impl Remote {
     }
     fn load(&mut self, ctx: &egui::Context) {
         let Some(a) = self.active.clone() else { return };
+        self.quota.clear();
         self.rows.clear();
         self.selected.clear();
         self.review = None;
@@ -499,10 +541,10 @@ impl Remote {
                             self.rows = list;
                             self.quota = quota;
                         }
-                        Ok(Outcome::Moved(msg)) => {
-                            self.rows.clear();
-                            self.selected.clear();
-                            self.status = msg;
+                        Ok(Outcome::Mutation(result)) => {
+                            self.mutation_pending = false;
+                            self.mutation_notice = result.unwrap_or_else(|e| e);
+                            self.load(ctx);
                         }
                         Err(e) => self.status = e,
                     }
@@ -510,9 +552,19 @@ impl Remote {
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.job = None;
-                    self.status = "Operazione interrotta. Verifica la posizione nel cloud.".into();
+                    if self.mutation_pending {
+                        self.mutation_pending = false;
+                        self.mutation_notice =
+                            "Esito incerto. Verifica la posizione nel cloud.".into();
+                        self.load(ctx);
+                    } else {
+                        self.status = "Consultazione interrotta.".into();
+                    }
                 }
             }
+        }
+        if !self.mutation_notice.is_empty() {
+            ui.label(&self.mutation_notice);
         }
         ui.label(&self.status);
         if self.job.is_some() {
@@ -567,12 +619,13 @@ impl Remote {
                     let trail = self.trail.clone();
                     self.rows.clear();
                     self.selected.clear();
+                    self.mutation_pending = true;
+                    self.mutation_notice.clear();
                     self.start(ctx, move |call| {
-                        match review {
+                        Ok(Outcome::Mutation(match review {
                             Review::Move(dest) => relocate(call, &a, &trail, &items, &dest),
                             Review::Trash => remove(call, &a, &trail, &items),
-                        }
-                        .map(Outcome::Moved)
+                        }))
                     });
                 }
             } else if ui.button("Indietro").clicked() {
@@ -581,6 +634,7 @@ impl Remote {
             return;
         }
         if ui.button("Aggiorna account rclone").clicked() {
+            self.mutation_notice.clear();
             self.active = None;
             self.trail.clear();
             self.rows.clear();
@@ -605,6 +659,7 @@ impl Remote {
             }
         });
         if let Some(a) = account {
+            self.mutation_notice.clear();
             self.active = Some(a);
             self.trail.clear();
             self.prefix.clear();
@@ -776,6 +831,117 @@ mod tests {
         }
     }
 
+    #[test]
+    fn malformed_matching_sibling_never_proves_uniqueness_or_absence() {
+        let a = Account {
+            name: "fixture".into(),
+            kind: "drive".into(),
+        };
+        let row = item();
+        let valid = serde_json::json!({"Name":row.name,"Path":row.name,"Size":row.bytes,"ID":row.id,"ModTime":row.modified,"IsDir":false});
+        let mut shortcut = valid.clone();
+        shortcut["OrigID"] = Value::from("other");
+        for rows in [
+            vec![shortcut.clone()],
+            vec![valid, shortcut],
+            vec![Value::Null],
+        ] {
+            let call = |_: &[String]| Ok(serde_json::json!(rows).to_string());
+            assert!(list(&call, &a, "", &row.name, true, 0).is_err());
+        }
+    }
+
+    #[test]
+    fn interrupted_delete_is_uncertain_and_is_never_retried() {
+        let a = Account {
+            name: "fixture".into(),
+            kind: "drive".into(),
+        };
+        let row = item();
+        let sent = std::cell::Cell::new(0);
+        let call = |args: &[String]| {
+            match args[0].as_str() {
+            "listremotes" => Ok(r#"[{"name":"fixture","type":"drive"}]"#.into()),
+            "lsjson" => Ok(serde_json::json!([{"Name":row.name,"Path":row.name,"Size":row.bytes,"ID":row.id,"ModTime":row.modified,"IsDir":false}]).to_string()),
+            "deletefile" => { sent.set(sent.get()+1); Err("Connessione interrotta".into()) }
+            other => panic!("unexpected command {other}"),
+        }
+        };
+        let result = remove(&call, &a, &[], std::slice::from_ref(&row)).unwrap_err();
+        assert!(result.contains("Rimozione incerta"));
+        assert!(result.contains("0 rimozioni verificate"));
+        assert_eq!(sent.get(), 1);
+    }
+
+    #[test]
+    fn changed_parent_after_mutation_invalidates_file_receipt() {
+        let account = Account {
+            name: "fixture".into(),
+            kind: "drive".into(),
+        };
+        let file = item();
+        let source_data =
+            serde_json::json!({"Name":"source", "Path":"source", "ID":"source-id", "IsDir":true});
+        let source = parse_entry(&source_data).unwrap();
+        let file_data = serde_json::json!({"Name":file.name,"Path":file.name,"ID":file.id,"IsDir":false,"Size":file.bytes,"ModTime":file.modified});
+        let destination = "Lindo revisione fixture";
+        let dest_data = serde_json::json!({"Name":destination, "Path":destination, "ID":"dest-id", "IsDir":true});
+        for (move_file, swap_source) in [(false, true), (true, true), (true, false)] {
+            let issued = std::cell::Cell::new(false);
+            let created = std::cell::Cell::new(false);
+            let call = |args: &[String]| -> Result<String, String> {
+                match args[0].as_str() {
+                    "listremotes" => return Ok(r#"[{"name":"fixture","type":"drive"}]"#.into()),
+                    "mkdir" => {
+                        assert!(!created.replace(true));
+                        return Ok(String::new());
+                    }
+                    "deletefile" | "moveto" => {
+                        assert!(!issued.replace(true));
+                        return Ok(String::new());
+                    }
+                    "lsjson" => (),
+                    other => panic!("unexpected command {other}"),
+                }
+                let root = args[1] == "fixture:";
+                let source_request = root && args.iter().any(|arg| arg == "+ /source");
+                let row = if source_request {
+                    Some(source_data.clone())
+                } else if root {
+                    created.get().then(|| dest_data.clone())
+                } else if args[1] == "fixture:source" {
+                    (!issued.get()).then(|| file_data.clone())
+                } else {
+                    issued.get().then(|| file_data.clone())
+                };
+                let rows = row
+                    .into_iter()
+                    .map(|mut row| {
+                        if root && issued.get() && source_request == swap_source {
+                            row["ID"] = Value::from("replaced");
+                        }
+                        row
+                    })
+                    .collect::<Vec<_>>();
+                Ok(serde_json::json!(rows).to_string())
+            };
+            let trail = std::slice::from_ref(&source);
+            let selected = std::slice::from_ref(&file);
+            let result = if move_file {
+                relocate(&call, &account, trail, selected, destination)
+            } else {
+                remove(&call, &account, trail, selected)
+            };
+            assert!(issued.get());
+            let error = result.unwrap_err();
+            assert!(error.contains(if move_file {
+                "Spostamento incerto"
+            } else {
+                "Rimozione incerta"
+            }));
+            assert!(error.starts_with("0 "));
+        }
+    }
     #[test]
     fn local_rclone_fixture_lists_filters_and_moves_without_account_access() {
         let Ok(exe) = binary() else { return };
