@@ -27,6 +27,8 @@ python3 tools/test-export.py
 
 Per verificare la finestra su 120.000 file in sottocartelle, 15.000 file nella stessa cartella e 3.600 duplicati, compila con `cargo build --locked --release --features ui-probe` e passa il binario e una directory locale di test esistente a `python3 tools/scale-ui.py`. La directory deve essere nel tuo utente e fuori da Library o Dropbox. La prova crea e rimuove le proprie fixture e richiede una sessione grafica macOS.
 
+Per una verifica di aspetto senza cambiare le impostazioni del Mac, il binario del bundle accetta `-AppleInterfaceStyle Dark` oppure `-AppleInterfaceStyle Light`. L’avvio normale segue l’aspetto di sistema.
+
 ## Firma e notarizzazione per distributori
 
 La firma è facoltativa per compilare e provare localmente. Per una distribuzione Developer ID, configura il tuo certificato nel Portachiavi e indica esplicitamente identità e team:

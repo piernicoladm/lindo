@@ -13,10 +13,10 @@
       "sha256": "1a33e34b47aa890c0c296d029f4039092146e5adaa9992bf62516b0b1b050d86"
     },
     {
-      "bytes": 4913,
+      "bytes": 5125,
       "mode": "0644",
       "path": "BUILD.md",
-      "sha256": "4c7ce949ce8c5cac19d72b28792212af4dad5827b03af72275c9f915b95d2f79"
+      "sha256": "7fac270bdd67913d3e7952304b8caff5afdf13f2e38ea2111bdbafb20b9822e6"
     },
     {
       "bytes": 2012,
@@ -199,10 +199,10 @@
       "sha256": "5f9b48e0c01c8a8a52f5ee823739073d7128f5310d96d064c7609fae32913e76"
     },
     {
-      "bytes": 2471,
+      "bytes": 2846,
       "mode": "0644",
       "path": "src/main.rs",
-      "sha256": "1dac43d103fac1716a43e04d609a10995359bb6d669c01459c0baf8212bb887e"
+      "sha256": "81d2792b5a68b4ae4ad997e9745f2caf6c72f0c5b636199c5e6436cadb64be71"
     },
     {
       "bytes": 1377,
@@ -289,10 +289,10 @@
       "sha256": "143d516012a142f4b3114da9fd77272c0bbff635f171dc4e2210945a2b0051b1"
     },
     {
-      "bytes": 79753,
+      "bytes": 80221,
       "mode": "0644",
       "path": "src/ui.rs",
-      "sha256": "568328b7a8f4b42e898336eaf520e3d5f6d76b324cfa503ae448d434781d77d2"
+      "sha256": "85139f51e861515c048c8a70732031e2898702638aacbceb55f4ca4f3c83622d"
     },
     {
       "bytes": 25995,

@@ -61,7 +61,15 @@ fn selftest() -> io::Result<()> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args_os().skip(1);
     match args.next().as_deref().and_then(|a| a.to_str()) {
-        None => ui::launch()?,
+        None => ui::launch(None)?,
+        Some("-AppleInterfaceStyle") => {
+            let theme = match args.next().as_deref().and_then(|v| v.to_str()) {
+                Some("Dark") => eframe::egui::Theme::Dark,
+                Some("Light") => eframe::egui::Theme::Light,
+                _ => return Err("Expected Dark or Light".into()),
+            };
+            ui::launch(Some(theme))?;
+        }
         Some("--version") => println!("Lindo {}", env!("CARGO_PKG_VERSION")),
         Some("--selftest") => selftest()?,
         #[cfg(feature = "ui-probe")]

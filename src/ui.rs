@@ -1805,7 +1805,7 @@ impl Drop for Lindo {
     }
 }
 
-fn run_window(fixture: Option<(PathBuf, Mode)>) -> eframe::Result {
+fn run_window(fixture: Option<(PathBuf, Mode)>, appearance: Option<egui::Theme>) -> eframe::Result {
     let window_start = fixture.as_ref().map(|_| std::time::Instant::now());
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -1817,6 +1817,14 @@ fn run_window(fixture: Option<(PathBuf, Mode)>) -> eframe::Result {
         "Lindo",
         options,
         Box::new(move |cc| {
+            if let Some(theme) = appearance {
+                cc.egui_ctx.set_theme(theme);
+                cc.egui_ctx
+                    .send_viewport_cmd(egui::ViewportCommand::SetTheme(match theme {
+                        egui::Theme::Dark => egui::SystemTheme::Dark,
+                        egui::Theme::Light => egui::SystemTheme::Light,
+                    }));
+            }
             let mut app = Lindo::new(&cc.egui_ctx);
             if let Some((path, mode)) = fixture {
                 let req = &mut app.pages.get_mut(&mode).unwrap().req;
@@ -1835,12 +1843,12 @@ fn run_window(fixture: Option<(PathBuf, Mode)>) -> eframe::Result {
     )
 }
 
-pub fn launch() -> eframe::Result {
-    run_window(None)
+pub fn launch(appearance: Option<egui::Theme>) -> eframe::Result {
+    run_window(None, appearance)
 }
 #[cfg(feature = "ui-probe")]
 pub fn launch_fixture(path: PathBuf, mode: Mode) -> eframe::Result {
-    run_window(Some((path, mode)))
+    run_window(Some((path, mode)), None)
 }
 
 #[cfg(test)]
