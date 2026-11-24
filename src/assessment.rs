@@ -55,6 +55,7 @@ struct Counts {
     skipped: u64,
     errors: u64,
     cancelled: bool,
+    notes: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DiskState {
@@ -151,6 +152,7 @@ impl Assessment {
                 skipped: report.skipped,
                 errors: report.errors,
                 cancelled: report.cancelled,
+                notes: report.notes.clone(),
             });
         }
     }
@@ -305,6 +307,22 @@ impl Assessment {
             };
             ui.label(format!("{} · {status}", title(row.request.mode)))
                 .on_hover_text(display_request(&row.request));
+            if let DiskState::Result(c) = &row.state {
+                if c.skipped > 0 || c.errors > 0 {
+                    egui::CollapsingHeader::new(format!(
+                        "Ambito ed errori · {}",
+                        title(row.request.mode)
+                    ))
+                    .show(ui, |ui| {
+                        for path in &row.request.roots {
+                            ui.small(path.display().to_string());
+                        }
+                        for note in &c.notes {
+                            ui.small(note);
+                        }
+                    });
+                }
+            }
         }
         for (i, row) in self.checks.iter().enumerate() {
             let label = row.check.title();
@@ -340,7 +358,8 @@ impl Assessment {
         &mut self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
-        requests: &[Request],
+        requests: &mut [Request],
+        choose_scope: impl FnOnce(&mut egui::Ui, &mut [Request]),
     ) -> bool {
         let mut launch = false;
         let running = self.worker.is_some() || self.pending_core();
@@ -351,7 +370,8 @@ impl Assessment {
             if running {
                 for row in &self.disks { ui.small(display_request(&row.request)); }
             } else {
-                for req in requests { ui.small(display_request(req)); }
+                choose_scope(ui,requests);
+                for req in requests.iter() { ui.small(display_request(req)); }
             }
             ui.add_enabled_ui(!running, |ui| {
                 ui.checkbox(&mut self.performance, "Misura CPU, memoria e alimentazione");
@@ -372,7 +392,7 @@ impl Assessment {
             });
             if !self.notice.is_empty() { ui.label(&self.notice); }
             ui.horizontal_wrapped(|ui| {
-                let start = ui.add_enabled(!self.core_busy && !running, egui::Button::new("Avvia analisi completa"));
+                let start = ui.add_enabled(!self.core_busy && !running && requests.iter().all(|r| !r.roots.is_empty()), egui::Button::new("Avvia analisi completa"));
                 if start.clicked() { launch = self.begin(requests, ctx, system_tools::scan_assessment); }
                 if running && ui.button("Interrompi analisi completa").clicked() {
                     self.cancel_request = self.pending_core();

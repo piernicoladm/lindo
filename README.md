@@ -1,6 +1,6 @@
 # Lindo
 
-Lindo 0.9.0 è una utility macOS scritta in Rust per individuare cosa occupa spazio e scegliere quali file conservare. Richiede macOS 26 e Apple Silicon. La panoramica scura mostra lo spazio disponibile e le dimensioni dei file da rivedere. Durante la scansione puoi vedere la cartella in esame e interrompere il lavoro. In Duplicati scegli la copia da conservare e controlli entrambi i percorsi prima dello spostamento nel Cestino. La ricerca degli strumenti e i preferiti sono disponibili dalla finestra principale.
+Lindo 0.9.1 è una utility macOS scritta in Rust per individuare cosa occupa spazio e scegliere quali file conservare. Richiede macOS 26 e Apple Silicon. La panoramica scura mostra lo spazio disponibile e le dimensioni dei file da rivedere. Durante la scansione puoi vedere la cartella in esame e interrompere il lavoro. In Duplicati scegli la copia da conservare e controlli entrambi i percorsi prima dello spostamento nel Cestino. La ricerca degli strumenti e i preferiti sono disponibili dalla finestra principale.
 
 ## Funzioni
 

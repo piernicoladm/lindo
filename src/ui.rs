@@ -701,7 +701,7 @@ impl Lindo {
                     if self.active.as_ref().is_some_and(|a| a.id == id) {
                         self.active = None;
                         self.assessment.record_core(mode, &result.report);
-                        self.status = format!("Analisi completata · {}", title(mode));
+                        self.status = overview::scan_status(mode, &result.report);
                         self.pages.get_mut(&mode).unwrap().install(result);
                     }
                 }
@@ -1180,6 +1180,7 @@ impl eframe::App for Lindo {
                         if let Some((mode, path)) = self.picker.draw(ui, ctx) {
                             let page = self.pages.get_mut(&mode).unwrap();
                             page.choose_root(path, self.append_root);
+                            self.home_panel.remember_picker_choice(mode);
                             self.append_root = false;
                         }
                     } else if self.searching {

@@ -28,13 +28,13 @@
       "bytes": 89132,
       "mode": "0644",
       "path": "Cargo.lock",
-      "sha256": "61f1f429513c117972a5db400f0bed9df15de420f633271bf568f5367284ece1"
+      "sha256": "8a33ee7ade9ba36380db35bced607f2e293a56ef86ecbd009f1655373468634e"
     },
     {
       "bytes": 1066,
       "mode": "0644",
       "path": "Cargo.toml",
-      "sha256": "4bc011f22129a03cb06a290169315214d6fb5164d694df9f007c4ad71e363333"
+      "sha256": "691cf5dc1a2cb3d72f602c97e620a418035047798c8ef5d2e75385a34e0e796d"
     },
     {
       "bytes": 9955,
@@ -70,7 +70,7 @@
       "bytes": 2283,
       "mode": "0644",
       "path": "Info.plist.in",
-      "sha256": "a61207278c7ad4e73841b4b62b3ce908bd242c820be7d280ae693cb507c71c75"
+      "sha256": "c9a869f78d1e2b0e52e2f1cdcc5979880c5168695c017ed488b00b9171582923"
     },
     {
       "bytes": 1076,
@@ -88,7 +88,7 @@
       "bytes": 4107,
       "mode": "0644",
       "path": "README.md",
-      "sha256": "6fdd8f26c43fbe7eb508a95b07786df5555eb8f82239e0dc493914f2017886cf"
+      "sha256": "701cd901511a2f6bb1cd62c8ae98940e43d6200d0b7d69cb4dc30c8216e62fe3"
     },
     {
       "bytes": 3855,
@@ -151,10 +151,10 @@
       "sha256": "5a34240dc6a6ca989d6887b9df22b78495352a1ee9afe8b04f37cbb34c0b487e"
     },
     {
-      "bytes": 16930,
+      "bytes": 17810,
       "mode": "0644",
       "path": "src/assessment.rs",
-      "sha256": "7a9e52ff2a1c34844324adbea3f9e74151dfe032dc70f4c2c319795504d81af6"
+      "sha256": "52240cbd6968b59f505a504bacc5c285ea32c527fe36ea2cd0ae0d379561948d"
     },
     {
       "bytes": 45367,
@@ -361,10 +361,10 @@
       "sha256": "143d516012a142f4b3114da9fd77272c0bbff635f171dc4e2210945a2b0051b1"
     },
     {
-      "bytes": 60665,
+      "bytes": 60734,
       "mode": "0644",
       "path": "src/ui.rs",
-      "sha256": "5629e38e08aa0bb8f36b9268b86a55c726bf93fe21a6789112ba66c605c2b281"
+      "sha256": "68fe26a6f3b5d3f6bb50501d016af49c0a3f0286815c0620f1089d75742a4a72"
     },
     {
       "bytes": 983,
@@ -385,10 +385,10 @@
       "sha256": "2b1b8e1699145578286a04c1f9a31a35de5338ef47fb6871044675de69167970"
     },
     {
-      "bytes": 32779,
+      "bytes": 49089,
       "mode": "0644",
       "path": "src/ui_overview.rs",
-      "sha256": "517f82a0523fd68f5c940001d1ba36b8f9b34cba1c82e10770631da3cfbb2140"
+      "sha256": "c9f36753a49cf42d4765998ffbffd132880a787f07f87556c0eb0fe652d4e809"
     },
     {
       "bytes": 9214,
@@ -397,10 +397,10 @@
       "sha256": "be63eb3166e71af6d3795ee554ae54abaeaec9254cb4bd2810a1c3a87daa0bf8"
     },
     {
-      "bytes": 49459,
+      "bytes": 55105,
       "mode": "0644",
       "path": "src/ui_results.rs",
-      "sha256": "643a1e3adb24dd2af0818ceefb1dcae18fdaef9e30ece5327531bbaaf5331177"
+      "sha256": "4bc69ef3f1d9cc1a3e6d00c89b4dad8bdb1cd5bbf24e7b679b22cd785a7867b1"
     },
     {
       "bytes": 25995,

@@ -12,9 +12,123 @@ pub(super) struct HomePanel {
     pending: Option<mpsc::Receiver<[u64; 4]>>,
     scopes: bool,
     quick_scope: bool,
+    scope: ScanScope,
+    root_overrides: HashMap<Mode, ScopeOverride>,
     inspect: Option<bool>,
     batch: Vec<Mode>,
     batch_start: u64,
+}
+
+const PERSONAL_FOLDERS: [(&str, &str); 6] = [
+    ("Downloads", "Download"),
+    ("Documents", "Documenti"),
+    ("Desktop", "Scrivania"),
+    ("Movies", "Filmati"),
+    ("Pictures", "Immagini"),
+    ("Music", "Musica"),
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScopeChoice {
+    Configured,
+    Downloads,
+    Personal,
+}
+
+struct ScopeOverride {
+    configured: Vec<PathBuf>,
+    scanned: Vec<PathBuf>,
+}
+
+struct ScanScope {
+    choice: ScopeChoice,
+    folders: [bool; 6],
+}
+
+impl Default for ScanScope {
+    fn default() -> Self {
+        Self {
+            choice: ScopeChoice::Personal,
+            folders: [true, true, true, false, false, false],
+        }
+    }
+}
+
+impl ScanScope {
+    fn show(&mut self, ui: &mut egui::Ui, quick: bool) {
+        ui.label(if quick {
+            "Cartelle per la mappa dello spazio"
+        } else {
+            "Cartelle personali da esaminare"
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(
+                &mut self.choice,
+                ScopeChoice::Configured,
+                "Ambiti configurati",
+            );
+            ui.selectable_value(&mut self.choice, ScopeChoice::Downloads, "Solo Download");
+            ui.selectable_value(
+                &mut self.choice,
+                ScopeChoice::Personal,
+                "Cartelle personali",
+            );
+        });
+        if self.choice == ScopeChoice::Personal {
+            ui.horizontal_wrapped(|ui| {
+                for ((_, name), enabled) in PERSONAL_FOLDERS.iter().zip(&mut self.folders) {
+                    ui.checkbox(enabled, *name);
+                }
+            });
+            if !self.folders.contains(&true) {
+                ui.label("Scegli almeno una cartella.");
+            }
+        }
+    }
+
+    fn apply(&self, requests: &mut [Request]) {
+        if self.choice == ScopeChoice::Configured {
+            return;
+        }
+        let roots: Vec<_> = home()
+            .into_iter()
+            .flat_map(|base| {
+                PERSONAL_FOLDERS
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| match self.choice {
+                        ScopeChoice::Downloads => *index == 0,
+                        ScopeChoice::Personal => self.folders[*index],
+                        ScopeChoice::Configured => false,
+                    })
+                    .map(move |(_, (relative, _))| base.join(relative))
+            })
+            .collect();
+        for req in requests
+            .iter_mut()
+            .filter(|r| matches!(r.mode, Mode::Large | Mode::Duplicates | Mode::Space))
+        {
+            req.roots.clone_from(&roots);
+        }
+    }
+}
+
+pub(super) fn scan_status(mode: Mode, report: &Report) -> String {
+    if report.errors > 0 {
+        format!(
+            "Analisi parziale · {} · {} errori",
+            title(mode),
+            report.errors
+        )
+    } else if report.skipped > 0 {
+        format!(
+            "Analisi conclusa · {} · {} esclusioni",
+            title(mode),
+            report.skipped
+        )
+    } else {
+        format!("Analisi completata · {}", title(mode))
+    }
 }
 
 // Reported bytes are logical sizes. Count a cache tree once and reserve one
@@ -110,6 +224,12 @@ fn category_amount(coverage: Coverage, amount: Option<u64>) -> String {
 }
 
 impl HomePanel {
+    pub(super) fn remember_picker_choice(&mut self, mode: Mode) {
+        self.root_overrides.remove(&mode);
+        if matches!(mode, Mode::Large | Mode::Space | Mode::Duplicates) {
+            self.scope.choice = ScopeChoice::Configured;
+        }
+    }
     fn refresh(&mut self, reports: Vec<Option<Arc<Results>>>, ctx: &egui::Context) {
         if let Some(rx) = &self.pending {
             match rx.try_recv() {
@@ -383,6 +503,14 @@ impl Lindo {
             .iter()
             .map(|m| {
                 let mut req = self.pages[m].req.clone();
+                if let Some(saved) = self
+                    .home_panel
+                    .root_overrides
+                    .get(m)
+                    .filter(|saved| saved.scanned == req.roots)
+                {
+                    req.roots.clone_from(&saved.configured);
+                }
                 if req.roots.is_empty() && matches!(m, Mode::Duplicates | Mode::Large) {
                     req.roots.extend(home().map(|p| p.join("Downloads")));
                 }
@@ -392,6 +520,27 @@ impl Lindo {
     }
 
     fn queue_home(&mut self, requests: Vec<Request>, ctx: &egui::Context) {
+        for request in &requests {
+            let current = &self.pages[&request.mode].req.roots;
+            let configured = self
+                .home_panel
+                .root_overrides
+                .get(&request.mode)
+                .filter(|saved| &saved.scanned == current)
+                .map_or(current, |saved| &saved.configured)
+                .clone();
+            if request.roots == configured {
+                self.home_panel.root_overrides.remove(&request.mode);
+            } else {
+                self.home_panel.root_overrides.insert(
+                    request.mode,
+                    ScopeOverride {
+                        configured,
+                        scanned: request.roots.clone(),
+                    },
+                );
+            }
+        }
         self.home_panel.batch = requests.iter().map(|r| r.mode).collect();
         self.home_panel.batch_start = self.next_id;
         self.quick.extend(requests);
@@ -410,6 +559,13 @@ impl Lindo {
         let amounts = self.home_panel.totals;
         let total = amounts.map(|a| a.into_iter().fold(0u64, u64::saturating_add));
         let review = total.is_some_and(|t| t > 0);
+        let finished_quick = self.home_panel.batch == QUICK
+            && self.quick.is_empty()
+            && self.active.is_none()
+            && self.next_id == self.home_panel.batch_start + QUICK.len() as u64
+            && QUICK.iter().all(|m| self.pages[m].result.is_some());
+        let quick_errors = finished_quick
+            && coverage(QUICK.iter().map(|m| self.pages[m].result.as_ref())) != Coverage::Complete;
         let art = self.artwork.home.clone();
         hero(ui, &art, |ui| {
             heading(ui, "Panoramica");
@@ -420,9 +576,20 @@ impl Lindo {
                 (_, Some(bytes)) => size(bytes),
                 (_, None) => "Calcolo…".into(),
             };
+            let value = if finished_quick {
+                if quick_errors {
+                    "Analisi parziale".into()
+                } else {
+                    "Analisi conclusa".into()
+                }
+            } else {
+                value
+            };
             ui.label(design::display(
                 value,
-                if review || (total.is_some() && coverage_all == Coverage::Complete) {
+                if !finished_quick
+                    && (review || (total.is_some() && coverage_all == Coverage::Complete))
+                {
                     64.
                 } else {
                     36.
@@ -434,15 +601,26 @@ impl Lindo {
                 Coverage::Partial => "Misurazione parziale",
                 Coverage::Complete => "da rivedere",
             };
-            ui.label(text(subtitle, 23.));
+            ui.label(text(
+                if finished_quick {
+                    "Spazio, cache e log"
+                } else {
+                    subtitle
+                },
+                23.,
+            ));
             ui.add_space(10.);
-            let label = if review {
+            let label = if finished_quick {
+                "Apri mappa dello spazio".to_owned()
+            } else if review {
                 format!("Rivedi {}", size(total.unwrap()))
             } else {
                 "Analizza il Mac".to_owned()
             };
             if design::primary(ui, &label, self.available()).clicked() {
-                if review {
+                if finished_quick {
+                    self.mode = Some(Mode::Space);
+                } else if review {
                     self.home_panel.inspect = Some(false);
                 } else {
                     self.home_panel.scopes = true;
@@ -498,22 +676,61 @@ impl Lindo {
                 }
             }
         }
-        if REVIEW.iter().any(|m| {
+        if finished_quick {
+            let examined = QUICK
+                .iter()
+                .filter_map(|m| self.pages[m].result.as_ref())
+                .fold(0u64, |n, r| n.saturating_add(r.report.visited));
+            ui.small(format!(
+                "Spazio, cache e log · {} voci esaminate nei tre controlli",
+                number(examined)
+            ));
+        }
+        if MODES.iter().any(|m| {
             self.pages[m]
                 .result
                 .as_ref()
-                .is_some_and(|r| r.report.errors > 0)
+                .is_some_and(|r| r.report.errors > 0 || r.report.skipped > 0)
         }) {
-            ui.small("Analisi parziale. Apri le categorie per consultare gli errori di accesso.");
+            egui::CollapsingHeader::new("Percorsi esclusi ed errori").show(ui, |ui| {
+                for mode in MODES {
+                    let page = &self.pages[&mode];
+                    let Some(result) = &page.result else {
+                        continue;
+                    };
+                    let report = &result.report;
+                    if report.errors == 0 && report.skipped == 0 {
+                        continue;
+                    }
+                    ui.strong(title(mode));
+                    for root in &page.req.roots {
+                        ui.small(root.display().to_string());
+                    }
+                    ui.label(format!(
+                        "{} esclusioni · {} errori",
+                        report.skipped, report.errors
+                    ));
+                    for note in &report.notes {
+                        ui.small(note);
+                    }
+                    if ui.button(format!("Apri {}", title(mode))).clicked() {
+                        self.mode = Some(mode);
+                    }
+                }
+            });
         }
         ui.add_space(16.);
         if measured && ui.button("Analizza di nuovo").clicked() {
             self.home_panel.scopes = true;
         }
-        let full = self.home_requests(&MODES);
+        let mut full = self.home_requests(&MODES);
         let busy = !self.available() || !self.quick.is_empty();
         self.assessment.set_core_busy(busy);
-        if self.assessment.show(ui, ctx, &full) {
+        let scope = &mut self.home_panel.scope;
+        if self.assessment.show(ui, ctx, &mut full, |ui, reqs| {
+            scope.show(ui, false);
+            scope.apply(reqs);
+        }) {
             self.queue_home(full, ctx);
         }
         if self.assessment.take_cancel_request() {
@@ -524,7 +741,8 @@ impl Lindo {
             let mut open = true;
             egui::Window::new("Ambito della scansione")
                 .collapsible(false)
-                .resizable(false)
+                .resizable(true)
+                .default_width(440.)
                 .open(&mut open)
                 .show(ctx, |ui| {
                     ui.horizontal_wrapped(|ui| {
@@ -539,23 +757,31 @@ impl Lindo {
                             "Spazio, cache e log",
                         );
                     });
-                    let reqs = self.home_requests(if self.home_panel.quick_scope {
+                    self.home_panel.scope.show(ui, self.home_panel.quick_scope);
+                    let mut reqs = self.home_requests(if self.home_panel.quick_scope {
                         &QUICK
                     } else {
                         &REVIEW
                     });
-                    for req in &reqs {
-                        ui.add_space(5.);
-                        ui.strong(title(req.mode));
-                        for root in &req.roots {
-                            ui.label(root.display().to_string());
-                        }
-                        if req.mode == Mode::Large {
-                            ui.small(format!("Soglia: {}", size(req.min_bytes)));
-                        }
-                    }
+                    self.home_panel.scope.apply(&mut reqs);
+                    egui::ScrollArea::vertical()
+                        .id_salt("scan-scopes")
+                        .max_height((ctx.screen_rect().height() * 0.35).clamp(96., 250.))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for req in &reqs {
+                                ui.add_space(5.);
+                                ui.strong(title(req.mode));
+                                for root in &req.roots {
+                                    ui.label(root.display().to_string());
+                                }
+                                if req.mode == Mode::Large {
+                                    ui.small(format!("Soglia: {}", size(req.min_bytes)));
+                                }
+                            }
+                        });
                     ui.add_space(10.);
-                    ui.label("I risultati saranno disponibili per la revisione.");
+                    ui.label("Le cartelle scelte valgono per questa scansione.");
                     if design::primary(
                         ui,
                         "Avvia scansione",
@@ -827,6 +1053,214 @@ impl Lindo {
 mod tests {
     use super::*;
     use crate::model::{Identity, Item};
+
+    #[test]
+    fn home_flow_on_synthetic_home() {
+        let tmp = tempfile::Builder::new()
+            .prefix("lindo-home-flow-")
+            .tempdir()
+            .unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "ui::overview::tests::home_flow_worker",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("HOME", &root)
+            .env("CFFIXED_USER_HOME", &root)
+            .env("LINDO_FIXTURE_WORKER", &root)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "launched by home_flow_on_synthetic_home inside an isolated HOME"]
+    fn home_flow_worker() {
+        let home = home().unwrap();
+        assert_eq!(
+            home,
+            PathBuf::from(std::env::var_os("LINDO_FIXTURE_WORKER").unwrap())
+        );
+        for rel in ["Downloads", "Documents", "Library/Caches", "Library/Logs"] {
+            std::fs::create_dir_all(home.join(rel)).unwrap();
+        }
+        let ctx = egui::Context::default();
+        design::configure(&ctx);
+        let mut app = Lindo::new(&ctx);
+        let screen = std::cell::Cell::new(egui::vec2(660., 460.));
+        let frame = |app: &mut Lindo, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen.get())),
+                events,
+                ..Default::default()
+            };
+            ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.overview(ui, ctx));
+            })
+            .shapes
+            .into_iter()
+            .filter_map(|s| match s.shape {
+                egui::Shape::Text(t) => {
+                    Some((t.galley.job.text.clone(), t.pos + t.galley.size() * 0.5))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+        };
+        let render = |app: &mut Lindo| {
+            frame(app, vec![]);
+            frame(app, vec![]);
+            frame(app, vec![])
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let click = |app: &mut Lindo, label: &str| {
+            let (_, pos) = frame(app, vec![])
+                .into_iter()
+                .find(|(text, _)| text == label)
+                .unwrap();
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+        };
+        app.home_panel.scopes = true;
+        let scope = render(&mut app);
+        let doc = home.join("Documents/visible.bin");
+        std::fs::write(&doc, b"test").unwrap();
+        let private = home.join("Documents/_6_Archivio_Private");
+        std::fs::create_dir(&private).unwrap();
+        std::fs::write(private.join("hidden.bin"), b"covered").unwrap();
+        std::os::unix::fs::symlink(&private, home.join("Documents/linked")).unwrap();
+        assert!(app.home_panel.scope.choice == ScopeChoice::Personal);
+        click(&mut app, "Ambiti configurati");
+        click(&mut app, "Cartelle personali");
+        click(&mut app, "Download");
+        click(&mut app, "Scrivania");
+        assert!(app.home_panel.scope.choice == ScopeChoice::Personal);
+        let paths = render(&mut app);
+        assert!(paths.contains(home.join("Documents").to_string_lossy().as_ref()));
+        let mut personal = app.home_requests(&MODES);
+        app.home_panel.scope.apply(&mut personal);
+        for req in &personal {
+            if matches!(req.mode, Mode::Large | Mode::Duplicates | Mode::Space) {
+                assert_eq!(req.roots, [home.join("Documents")]);
+            } else {
+                assert_eq!(req.roots, app.pages[&req.mode].req.roots);
+            }
+        }
+        let mut selected = personal
+            .into_iter()
+            .find(|r| r.mode == Mode::Large)
+            .unwrap();
+        selected.min_bytes = 1;
+        let picked = crate::scan::run(&selected, &AtomicBool::new(false), &Progress::default());
+        assert_eq!(picked.errors, 0, "{:?}", picked.notes);
+        assert_eq!(
+            picked.items.iter().map(|i| &i.path).collect::<Vec<_>>(),
+            [&doc]
+        );
+        assert!(picked.skipped >= 2);
+        for label in ["Download", "Scrivania", "Filmati", "Immagini", "Musica"] {
+            click(&mut app, label);
+        }
+        assert!(app.home_panel.scope.folders.iter().all(|v| *v));
+        let start_pos = frame(&mut app, vec![])
+            .into_iter()
+            .find(|(text, _)| text == "Avvia scansione")
+            .unwrap()
+            .1;
+        assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, screen.get()).contains(start_pos));
+        click(&mut app, "Solo Download");
+        assert!(app.home_panel.scope.choice == ScopeChoice::Downloads);
+        let mut review = app.home_requests(&REVIEW);
+        app.home_panel.scope.apply(&mut review);
+        assert!(review
+            .iter()
+            .filter(|r| matches!(r.mode, Mode::Large | Mode::Duplicates))
+            .all(|r| r.roots == [home.join("Downloads")]));
+        app.pages.get_mut(&Mode::Space).unwrap().req.roots = vec![home.join("Documents")];
+        click(&mut app, "Spazio, cache e log");
+        click(&mut app, "Avvia scansione");
+        assert!(!app.home_panel.scopes);
+        assert_eq!(app.quick.len(), QUICK.len());
+        while let Some(req) = app.quick.pop_front() {
+            app.pages.get_mut(&req.mode).unwrap().req = req.clone();
+            app.launch_scan(req.mode, &ctx);
+            let deadline = std::time::Instant::now() + Duration::from_secs(4);
+            while app.active.is_some() {
+                assert!(std::time::Instant::now() < deadline);
+                app.receive();
+                std::thread::yield_now();
+            }
+        }
+        assert_eq!(app.pages[&Mode::Space].req.roots, [home.join("Downloads")]);
+        assert_eq!(
+            app.home_requests(&[Mode::Space])[0].roots,
+            [home.join("Documents")]
+        );
+        let summary = render(&mut app);
+        click(&mut app, "Apri mappa dello spazio");
+        assert_eq!(app.mode, Some(Mode::Space));
+        let broken = app.pages.get_mut(&Mode::Logs).unwrap();
+        broken.req.roots = vec![home.join("Library/Logs/missing")];
+        app.launch_scan(Mode::Logs, &ctx);
+        let deadline = std::time::Instant::now() + Duration::from_secs(4);
+        while app.active.is_some() {
+            assert!(std::time::Instant::now() < deadline);
+            app.receive();
+            std::thread::yield_now();
+        }
+        screen.set(egui::vec2(1100., 850.));
+        assert!(render(&mut app).contains("Percorsi esclusi ed errori"));
+        click(&mut app, "Percorsi esclusi ed errori");
+        assert!(render(&mut app).contains("Library/Logs/missing"));
+        let result = app.pages[&Mode::Logs].result.as_ref().unwrap();
+        assert!(
+            result.report.errors > 0 && result.report.notes.iter().any(|n| n.contains("missing"))
+        );
+        let checks = [
+            ("editable scope", scope.contains("Cartelle personali")),
+            (
+                "completed quick preset",
+                summary.contains("Apri mappa dello spazio") && !summary.contains("Da completare"),
+            ),
+            (
+                "failed scan status",
+                app.status.to_lowercase().contains("error")
+                    || app.status.to_lowercase().contains("parziale"),
+            ),
+        ];
+        let failures: Vec<_> = checks
+            .into_iter()
+            .filter(|(_, passed)| !passed)
+            .map(|(name, _)| name)
+            .collect();
+        assert!(
+            failures.is_empty(),
+            "UI regressions: {failures:?}; scan status: {}; summary: {summary}",
+            app.status
+        );
+    }
 
     #[test]
     fn zero_bytes_require_complete_coverage() {

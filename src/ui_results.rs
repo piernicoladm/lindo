@@ -335,7 +335,7 @@ impl Lindo {
             let footer_height = 47.;
             let mut body = panel;
             body.max.y = (panel.bottom() - footer_height - 5.).max(body.top());
-            let reveal = ui
+            let shown = ui
                 .scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
                     ui.set_clip_rect(ui.clip_rect().intersect(body));
                     duplicate_group(ui, page, &results)
@@ -361,8 +361,8 @@ impl Lindo {
             } else {
                 format!("{} copie selezionate", number(count))
             };
-            let cta = format!("Rivedi {}", size(page.selected_bytes));
-            let mut left = action_cell(ui, actions, false, "selected", 168.);
+            let action_width = if count == 0 { 208. } else { 168. };
+            let mut left = action_cell(ui, actions, false, "selected", action_width);
             left.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.;
                 ui.add(egui::Label::new(design::display(summary, 17.)).truncate());
@@ -370,8 +370,35 @@ impl Lindo {
                     ui.small(format!("{} nascoste dal filtro", number(hidden)));
                 }
             });
-            let mut right = action_cell(ui, actions, true, "review", 168.);
-            if design::primary(&mut right, &cta, count > 0 && available).clicked() {
+            let mut right = action_cell(ui, actions, true, "review", action_width);
+            if count == 0 {
+                if design::primary(
+                    &mut right,
+                    "Seleziona copie extra",
+                    shown.is_some() && available,
+                )
+                .on_hover_text(
+                    "Seleziona le copie extra del gruppo aperto. La copia protetta resta sul Mac.",
+                )
+                .clicked()
+                {
+                    if let Some((group, _)) = &shown {
+                        if let Some(keeper) = page.keeper(*group) {
+                            for &i in &results.groups[group] {
+                                if i != keeper {
+                                    page.select(i, true);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if design::primary(
+                &mut right,
+                &format!("Rivedi {}", size(page.selected_bytes)),
+                available,
+            )
+            .clicked()
+            {
                 self.review = Review::snapshot(page).map(|mut review| {
                     // Keep source paths adjacent to retained paths in every group.
                     let items = &review.data.report.items;
@@ -386,7 +413,7 @@ impl Lindo {
                 });
                 self.confirm = self.review.is_some();
             }
-            if let Some(path) = reveal {
+            if let Some((_, Some(path))) = shown {
                 self.reveal(path, ctx);
             }
             self.refresh_filter(mode, ctx);
@@ -657,7 +684,11 @@ fn status_icon(ui: &mut egui::Ui, keep: bool) {
     }
 }
 
-fn duplicate_group(ui: &mut egui::Ui, page: &mut Page, results: &Results) -> Option<PathBuf> {
+fn duplicate_group(
+    ui: &mut egui::Ui,
+    page: &mut Page,
+    results: &Results,
+) -> Option<(u64, Option<PathBuf>)> {
     let count = page.count();
     if count == 0 {
         ui.label(if page.query.is_empty() {
@@ -799,7 +830,7 @@ fn duplicate_group(ui: &mut egui::Ui, page: &mut Page, results: &Results) -> Opt
                                         page.select(i, false);
                                     }
                                     let width = (ui.available_width()
-                                        - if compact { 4. } else { 190. })
+                                        - if compact { 4. } else { 235. })
                                     .max(40.);
                                     ui.allocate_ui_with_layout(
                                         egui::vec2(width, 32.),
@@ -840,7 +871,7 @@ fn duplicate_group(ui: &mut egui::Ui, page: &mut Page, results: &Results) -> Opt
                     },
                 );
         });
-    reveal
+    Some((group, reveal))
 }
 
 fn copy_action(
@@ -856,15 +887,32 @@ fn copy_action(
         ui.colored_label(design::LIME, "Resta sul Mac");
     } else {
         let mut checked = chosen;
+        let label = if chosen {
+            "Da spostare"
+        } else {
+            "Sposta questa copia"
+        };
         let response = ui
-            .checkbox(&mut checked, "Da spostare")
+            .scope(|ui| {
+                let widgets = &mut ui.visuals_mut().widgets;
+                for state in [
+                    &mut widgets.inactive,
+                    &mut widgets.hovered,
+                    &mut widgets.active,
+                ] {
+                    state.corner_radius = egui::CornerRadius::same(3);
+                    state.bg_stroke.color = design::MUTED;
+                }
+                ui.checkbox(&mut checked, label)
+            })
+            .inner
             .on_hover_text(format!("Seleziona per il Cestino\n{}", item.path.display()));
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::Checkbox,
                 ui.is_enabled(),
                 checked,
-                format!("Da spostare: {}", item.path.display()),
+                format!("{label}: {}", item.path.display()),
             )
         });
         if response.changed() {
@@ -1055,6 +1103,114 @@ fn action_cell(
 #[cfg(test)]
 mod layout_tests {
     use super::*;
+
+    #[test]
+    fn empty_selection_prompts_for_explicit_group_selection() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let mut report = Report::default();
+        for (name, group) in [
+            ("a.bin", 1),
+            ("b.bin", 1),
+            ("c.bin", 1),
+            ("d.bin", 2),
+            ("e.bin", 2),
+        ] {
+            let path = root.join(name);
+            std::fs::write(&path, b"example").unwrap();
+            report.items.push(crate::model::Item {
+                identity: crate::trash::Identity::read(&path).unwrap(),
+                path,
+                group: Some(group),
+                bytes: 7,
+                cloud: false,
+            });
+        }
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        design::configure(&ctx);
+        let mut app = Lindo::new(&ctx);
+        app.mode = Some(Mode::Duplicates);
+        let page = app.pages.get_mut(&Mode::Duplicates).unwrap();
+        page.install(Arc::new(Results::prepare(Mode::Duplicates, report)));
+        page.keepers.insert(1, 1);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(660., 460.));
+        let draw = |app: &mut Lindo, events| {
+            let raw = egui::RawInput {
+                screen_rect: Some(screen),
+                events,
+                ..Default::default()
+            };
+            let output = ctx.run(raw, |ctx| {
+                egui::SidePanel::left("nav")
+                    .exact_width(160.)
+                    .show(ctx, |_| {});
+                egui::TopBottomPanel::bottom("status")
+                    .exact_height(24.)
+                    .show(ctx, |_| {});
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.add_space(58.);
+                    app.section(ui, Mode::Duplicates, ctx);
+                });
+            });
+            output.platform_output.accesskit_update.unwrap()
+        };
+        let _ = draw(&mut app, vec![]);
+        let initial = draw(&mut app, vec![]);
+        let controls: Vec<_> = initial
+            .nodes
+            .iter()
+            .filter_map(|(_, n)| n.label())
+            .collect();
+        assert!(
+            !controls.iter().any(|s| s.starts_with("Da spostare")),
+            "An unchecked copy already reads 'Da spostare'"
+        );
+        assert!(controls
+            .iter()
+            .any(|s| s.starts_with("Sposta questa copia")));
+        let bounds = initial
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some("Seleziona copie extra"))
+            .and_then(|(_, n)| n.bounds())
+            .unwrap();
+        assert!(bounds.x1 <= 660. && bounds.y1 <= 436.);
+        let pos = egui::pos2(
+            ((bounds.x0 + bounds.x1) * 0.5) as f32,
+            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+        );
+        assert!(app.pages[&Mode::Duplicates].selected.is_empty());
+        for pressed in [true, false] {
+            let _ = draw(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        let after = draw(&mut app, vec![]);
+        let selected = &app.pages[&Mode::Duplicates];
+        assert_eq!(selected.selected, HashSet::from([0, 2]));
+        assert_eq!(selected.selected_bytes, 14);
+        assert_eq!(selected.keeper(1), Some(1));
+        assert_eq!(selected.keeper(2), Some(3));
+        assert!(app.review.is_none() && !app.cleaning);
+        assert!(after
+            .nodes
+            .iter()
+            .any(|(_, n)| n.label() == Some("Rivedi 14 B")));
+        assert!(after
+            .nodes
+            .iter()
+            .any(|(_, n)| n.label().is_some_and(|s| s.starts_with("Da spostare"))));
+    }
 
     #[test]
     fn compact_review_actions_remain_in_view_and_share_a_row() {
