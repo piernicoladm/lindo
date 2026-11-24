@@ -1,8 +1,8 @@
-# Strumenti di Lindo 0.8
+# Strumenti di Lindo 0.9
 
 | Esigenza | Come usarla in Lindo | Ambito |
 | --- | --- | --- |
-| Analisi rapida e completa | Panoramica | Il controllo rapido copre mappa, cache browser e log. L’analisi completa include le sei aree disco, risorse e protezioni di macOS, con scansione ClamAV opzionale di una cartella esplicita. Mostra copertura, risultati ed errori. |
+| Analisi rapida e completa | Panoramica | La panoramica permette di analizzare file grandi, duplicati, cache e log dopo aver rivisto le cartelle. Il controllo rapido copre mappa, cache browser e log. L’analisi completa include le sei aree disco, risorse e protezioni di macOS, con scansione ClamAV opzionale di una cartella esplicita. Mostra copertura, risultati ed errori. |
 | Spazio su disco | Mappa dello spazio, Mappa proporzionale | Le aree rappresentano byte allocati. Clic su una cartella per approfondire. Misura di riferimento per cartella nella sessione. |
 | File grandi, vecchi e download | File grandi oppure Download e immagini | Filtri per tipo, dimensione e data di modifica. Il Cestino richiede revisione. |
 | Duplicati e foto simili | Duplicati oppure Download e immagini, Immagini simili | I duplicati sono confrontati byte per byte anche tra cartelle o volumi scelti insieme. La somiglianza percettiva è disponibile per JPEG, PNG, HEIC e HEIF. La copia di riferimento viene ricontrollata. |
@@ -19,8 +19,8 @@
 | Schede e privacy | Mail e browser | Chrome identifica schede web duplicate nella stessa finestra e ricontrolla quella da conservare. Cronologia e cookie si gestiscono nelle schermate native del browser. Reti note ed elementi recenti si gestiscono nei controlli macOS indicati. |
 | File locali sincronizzati | Mail e browser, Cloud locale | iCloud rimuove la copia locale di un file già caricato. I client Dropbox, OneDrive e Google Drive espongono la loro azione per liberare spazio nel Finder. |
 | File solo online | Archivi cloud | Dropbox, Google Drive e OneDrive tramite rclone. Quota, navigazione, filtro, spostamento sullo stesso account e rimozione presso il provider. Una cartella di revisione continua a consumare quota. |
-| Monitor e schermo | Panoramica | Disco, carico medio, memoria, batteria e velocità di rete in barra dei menu nel processo di Lindo, con permanenza facoltativa dopo la chiusura della finestra. Schermo nero per 45 secondi, blocco tastiera opzionale con autorizzazione macOS. Esc, clic e timer permettono di uscire. macOS può riservare i tasti hardware. |
-| Accesso agli strumenti | Panoramica | Ricerca per nome o funzione, preferiti salvati sul Mac, sezioni raggiungibili dalla barra laterale. |
+| Monitor e schermo | Impostazioni | Disco, carico medio, memoria, batteria e velocità di rete in barra dei menu nel processo di Lindo, con permanenza facoltativa dopo la chiusura della finestra. Schermo nero per 45 secondi, blocco tastiera opzionale con autorizzazione macOS. Esc, clic e timer permettono di uscire. macOS può riservare i tasti hardware. |
+| Accesso agli strumenti | Barra laterale e Cerca | Ricerca per nome o funzione, preferiti salvati sul Mac, sezioni raggiungibili dalla barra laterale. |
 
 ## Copertura e differenze
 

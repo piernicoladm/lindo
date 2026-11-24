@@ -187,9 +187,20 @@ struct Scan<'a> {
     directories: HashSet<Node>,
     hardlinks: HashSet<Node>,
     cutoff: i64,
+    next_directory_sample: std::time::Instant,
     space_totals: SpaceStats,
 }
 impl Scan<'_> {
+    fn sample_directory(&mut self, path: &Path) {
+        let now = std::time::Instant::now();
+        if now >= self.next_directory_sample {
+            if let Ok(mut current) = self.progress.current_directory.try_lock() {
+                path.clone_into(&mut current);
+                self.next_directory_sample = now + std::time::Duration::from_millis(160);
+            }
+        }
+    }
+
     fn visit(&mut self, n: u64) {
         self.report.visited += n;
         self.progress
@@ -246,6 +257,10 @@ impl Scan<'_> {
         };
         self.progress.phase.store(TREE, Ordering::Relaxed);
         self.progress.tree_entries.store(0, Ordering::Relaxed);
+        // A single bundle or cache tree may take longer than the sample interval.
+        if let Ok(mut directory) = self.progress.current_directory.try_lock() {
+            path.clone_into(&mut directory);
+        }
         let snapshot = Identity::tree_cancel_progress(
             path,
             apps,
@@ -276,6 +291,7 @@ impl Scan<'_> {
         }
     }
     fn walk(&mut self, path: &Path, depth: usize, expected: Option<Node>) -> u64 {
+        self.sample_directory(path);
         let mut dir = match policy::children(path) {
             Ok(d) => d,
             Err(e) => {
@@ -594,6 +610,7 @@ pub fn run(req: &Request, stop: &AtomicBool, progress: &Progress) -> Report {
         report: Report::default(),
         directories: HashSet::new(),
         hardlinks: HashSet::new(),
+        next_directory_sample: std::time::Instant::now(),
         cutoff: now - 7 * 24 * 3600,
         space_totals: SpaceStats::default(),
     };
@@ -699,6 +716,7 @@ mod tests {
                 report: Report::default(),
                 directories: HashSet::new(),
                 hardlinks: HashSet::new(),
+                next_directory_sample: std::time::Instant::now(),
                 cutoff: 0,
                 space_totals: SpaceStats::default(),
             };

@@ -10,6 +10,7 @@ pub struct Progress {
     pub hashed_bytes: AtomicU64,
     pub compared_bytes: AtomicU64,
     pub phase: AtomicU8,
+    pub current_directory: std::sync::Mutex<PathBuf>,
 }
 
 pub const WALK: u8 = 0;

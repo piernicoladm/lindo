@@ -1,3 +1,14 @@
+#[path = "ui_artwork.rs"]
+mod artwork;
+#[path = "ui_design.rs"]
+mod design;
+#[path = "ui_navigation.rs"]
+mod navigation;
+use navigation::{extra_destination, mode_destination};
+#[path = "ui_overview.rs"]
+mod overview;
+#[path = "ui_results.rs"]
+mod results;
 use crate::model::{Mode, Progress, Report, Request, COMPARE, HASH, TREE};
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -53,7 +64,13 @@ pub(crate) fn size(bytes: u64) -> String {
         ("KB", 1_000),
     ] {
         if bytes >= divisor {
-            return format!("{:.1} {unit}", bytes as f64 / divisor as f64);
+            let tenths =
+                bytes / (divisor / 10) + u64::from((bytes % (divisor / 10)) >= divisor / 20);
+            return if tenths.is_multiple_of(10) {
+                format!("{} {unit}", tenths / 10)
+            } else {
+                format!("{},{} {unit}", tenths / 10, tenths % 10)
+            };
         }
     }
     format!("{bytes} B")
@@ -217,6 +234,7 @@ struct Page {
     applied: String,
     selected: HashSet<usize>,
     selected_visible: usize,
+    selected_bytes: u64,
     keepers: HashMap<u64, usize>,
     history: Vec<PathBuf>,
 }
@@ -250,6 +268,7 @@ impl Page {
             applied: String::new(),
             selected: HashSet::new(),
             selected_visible: 0,
+            selected_bytes: 0,
             keepers: HashMap::new(),
             history: vec![],
         }
@@ -262,6 +281,7 @@ impl Page {
         self.visible_by_path.clear();
         self.applied.clear();
         self.selected_visible = 0;
+        self.selected_bytes = 0;
     }
     fn install(&mut self, result: Arc<Results>) {
         self.invalidate();
@@ -292,11 +312,20 @@ impl Page {
             .or_else(|| self.result.as_ref()?.groups.get(&group)?.first().copied())
     }
     fn select(&mut self, id: usize, needed: bool) {
-        if needed && self.selected.insert(id) && self.is_visible(id) {
-            self.selected_visible += 1;
-        }
-        if !needed && self.selected.remove(&id) && self.is_visible(id) {
-            self.selected_visible -= 1;
+        let Some(item) = self.result.as_ref().and_then(|r| r.report.items.get(id)) else {
+            return;
+        };
+        let bytes = item.bytes;
+        if needed && self.selected.insert(id) {
+            self.selected_bytes = self.selected_bytes.saturating_add(bytes);
+            if self.is_visible(id) {
+                self.selected_visible += 1;
+            }
+        } else if !needed && self.selected.remove(&id) {
+            self.selected_bytes = self.selected_bytes.saturating_sub(bytes);
+            if self.is_visible(id) {
+                self.selected_visible -= 1;
+            }
         }
     }
     fn select_visible(&mut self) {
@@ -310,6 +339,9 @@ impl Page {
             let i = self.row_id(row);
             let protected = result.report.items[i].group.and_then(|g| self.keeper(g)) == Some(i);
             if !protected && self.selected.insert(i) {
+                self.selected_bytes = self
+                    .selected_bytes
+                    .saturating_add(result.report.items[i].bytes);
                 self.selected_visible += 1;
             }
         }
@@ -471,7 +503,7 @@ enum Event {
     Scan(u64, Mode, Arc<Results>),
     Filter(Mode, Arc<Results>, String, (Vec<usize>, Vec<usize>)),
     Trash(Mode, TrashSummary),
-    Disk(Option<(u64, u64)>),
+    Disk(Option<(u64, u64, String)>),
     Reveal(Result<(), String>),
 }
 
@@ -513,6 +545,11 @@ const EXTRAS: [(Extra, &str); 12] = [
 ];
 
 struct Lindo {
+    artwork: artwork::Artwork,
+    home_panel: overview::HomePanel,
+    destination: design::Destination,
+    searching: bool,
+    search_origin: Option<(design::Destination, Option<Mode>, Option<Extra>)>,
     extra: Option<Extra>,
     assessment: crate::assessment::Assessment,
     reset: crate::app_reset::AppReset,
@@ -548,13 +585,14 @@ struct Lindo {
     status: String,
     failures: Vec<String>,
     disk: Option<(u64, u64)>,
+    volume_label: String,
     disk_pending: bool,
     disk_measured: std::time::Instant,
     filtering: bool,
     fixture: Option<Fixture>,
 }
 
-fn disk_usage() -> Option<(u64, u64)> {
+fn disk_usage() -> Option<(u64, u64, String)> {
     use std::os::unix::ffi::OsStrExt;
     let path = home().unwrap_or_else(|| PathBuf::from("/"));
     let cpath = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
@@ -567,9 +605,20 @@ fn disk_usage() -> Option<(u64, u64)> {
         out.assume_init()
     };
     let unit = stat.f_frsize as u64;
+    let label = objc2::rc::autoreleasepool(|_| {
+        use objc2_foundation::{NSString, NSURLVolumeLocalizedNameKey, NSURL};
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str()?));
+        let mut value = None;
+        // Foundation documents the localized volume name as an NSString resource.
+        unsafe { url.getResourceValue_forKey_error(&mut value, NSURLVolumeLocalizedNameKey) }
+            .ok()?;
+        Some(value?.downcast_ref::<NSString>()?.to_string())
+    })
+    .unwrap_or_else(|| "Disco dell’utente".into());
     Some((
         (stat.f_blocks as u64).saturating_mul(unit),
         (stat.f_bavail as u64).saturating_mul(unit),
+        label,
     ))
 }
 
@@ -597,6 +646,11 @@ impl Lindo {
             repaint.request_repaint();
         });
         Self {
+            artwork: artwork::Artwork::new(ctx),
+            home_panel: Default::default(),
+            destination: design::Destination::Home,
+            searching: false,
+            search_origin: None,
             pages: MODES.into_iter().map(|m| (m, Page::new(m))).collect(),
             tool_query: String::new(),
             favorites: Self::favorite_tools(),
@@ -632,6 +686,7 @@ impl Lindo {
             status: String::new(),
             failures: vec![],
             disk: None,
+            volume_label: "Disco dell’utente".into(),
             disk_pending: true,
             disk_measured: std::time::Instant::now(),
             filtering: false,
@@ -694,7 +749,10 @@ impl Lindo {
                     }
                 }
                 Event::Disk(value) => {
-                    self.disk = value;
+                    self.disk = value.map(|(total, free, label)| {
+                        self.volume_label = label;
+                        (total, free)
+                    });
                     self.disk_pending = false;
                     self.disk_measured = std::time::Instant::now();
                 }
@@ -872,634 +930,6 @@ impl Lindo {
             ctx.request_repaint();
         });
     }
-
-    fn overview(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.heading("Panoramica");
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.strong("Disco dell’utente");
-            if ui
-                .add_enabled(
-                    !self.disk_pending,
-                    egui::Button::new("Aggiorna spazio").small(),
-                )
-                .clicked()
-            {
-                self.request_disk_usage(ctx);
-            }
-        });
-        if let Some((total, free)) = self.disk {
-            let used = total.saturating_sub(free);
-            ui.label(format!("{} disponibili su {}", size(free), size(total)));
-            ui.add(egui::ProgressBar::new(used as f32 / total.max(1) as f32).desired_width(340.0));
-        } else {
-            ui.label(if self.disk_pending {
-                "Misurazione…"
-            } else {
-                "Capacità del volume non disponibile."
-            });
-        }
-        self.desktop.controls(ui, ctx, self.disk);
-        ui.add_space(18.0);
-        ui.separator();
-        ui.strong("Analisi rapida");
-        let quick_modes = [Mode::Space, Mode::Cache, Mode::Logs];
-        for mode in quick_modes {
-            let roots = &self.pages[&mode].req.roots;
-            ui.small(format!(
-                "{} · {}",
-                title(mode),
-                roots
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        if ui
-            .add_enabled(
-                self.available() && self.quick.is_empty(),
-                egui::Button::new("Analizza queste tre aree"),
-            )
-            .clicked()
-        {
-            self.quick
-                .extend(quick_modes.map(|mode| self.pages[&mode].req.clone()));
-            ctx.request_repaint();
-        }
-        self.assessment
-            .set_core_busy(!self.available() || !self.quick.is_empty());
-        let requests: Vec<_> = MODES
-            .iter()
-            .map(|mode| {
-                let mut req = self.pages[mode].req.clone();
-                if req.roots.is_empty() && matches!(mode, Mode::Large | Mode::Duplicates) {
-                    req.roots.extend(home().map(|h| h.join("Downloads")));
-                }
-                req
-            })
-            .collect();
-        if self.assessment.show(ui, ctx, &requests) {
-            self.quick.extend(requests);
-            ctx.request_repaint();
-        }
-        if self.assessment.take_cancel_request() {
-            self.cancel();
-        }
-        ui.separator();
-        ui.horizontal_wrapped(|ui| {
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut self.tool_query).hint_text("Trova uno strumento…"),
-            );
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
-                search.request_focus();
-            }
-        });
-        let query = self.tool_query.to_lowercase();
-        let tools = MODES
-            .into_iter()
-            .map(|m| (title(m), hint(m), Some(m), None))
-            .chain(EXTRAS.iter().map(|&(extra, label)| {
-                let detail = match extra {
-                    Extra::Clutter => "File vecchi, archivi, installatori e immagini simili",
-                    Extra::Legacy => {
-                        "Preferenze danneggiate, agenti di avvio non più presenti e account rimossi"
-                    }
-                    Extra::Trim => "Alleggerimento controllato di app universali, architettura Intel e lingue",
-                    Extra::MailTrash => "Messaggi nel cestino di un singolo account Apple Mail",
-                    Extra::SystemJunk => "Pulizia selettiva di log archiviati e cache rigenerabili in Library del Mac",
-                    Extra::Junk => "Cache di sviluppo e AI, disinstallazione, backup iOS e residui",
-                    Extra::System => {
-                        "Volumi, snapshot, aggiornamenti, malware, manutenzione, login e Cestino"
-                    }
-                    Extra::Accounts => {
-                        "Allegati Mail, newsletter, schede Chrome, privacy e copie locali iCloud"
-                    }
-                    Extra::Reset => {
-                        "Preferenze delle app, backup recuperabili, lingue e architetture"
-                    }
-                    Extra::Versions => "Revisioni storiche dei documenti salvate da macOS",
-                    Extra::Updates => {
-                        "Versioni delle app e aggiornamenti degli editori con Sparkle"
-                    }
-                    Extra::Remote => "Quota e file online di Dropbox, Google Drive e OneDrive",
-                };
-                (label, detail, None, Some(extra))
-            }));
-        let mut found = false;
-        for favorite in [true, false] {
-            for (name, detail, mode, extra) in tools.clone() {
-                if self.favorites.contains(name) != favorite
-                    || !(name.to_lowercase().contains(&query)
-                        || detail.to_lowercase().contains(&query))
-                {
-                    continue;
-                }
-                found = true;
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .small_button(if favorite { "★" } else { "☆" })
-                        .on_hover_text(if favorite {
-                            "Rimuovi dai preferiti"
-                        } else {
-                            "Aggiungi ai preferiti"
-                        })
-                        .clicked()
-                    {
-                        if favorite {
-                            self.favorites.remove(name);
-                        } else {
-                            self.favorites.insert(name.to_owned());
-                        }
-                        objc2_foundation::NSUserDefaults::standardUserDefaults().setBool_forKey(
-                            !favorite,
-                            &objc2_foundation::NSString::from_str(&format!("tool.favorite.{name}")),
-                        );
-                    }
-                    if ui.button(name).clicked() {
-                        self.mode = mode;
-                        self.extra = extra;
-                    }
-                    if let Some(result) = mode.and_then(|m| self.pages[&m].result.as_ref()) {
-                        ui.small(format!(
-                            "{} risultati · {} errori",
-                            result.report.items.len(),
-                            result.report.errors
-                        ));
-                    }
-                });
-                ui.small(detail);
-                ui.separator();
-            }
-        }
-        if !found {
-            ui.label("Nessuno strumento corrisponde alla ricerca.");
-        }
-    }
-
-    fn section(&mut self, ui: &mut egui::Ui, mode: Mode, ctx: &egui::Context) {
-        ui.horizontal_wrapped(|ui| {
-            ui.heading(title(mode));
-            if mode == Mode::Apps && ui.button("Ripristino app…").clicked() {
-                self.extra = Some(Extra::Reset);
-                self.mode = None;
-            }
-            if mode == Mode::Space && ui.button("Revisioni documento…").clicked() {
-                self.extra = Some(Extra::Versions);
-                self.mode = None;
-            }
-        });
-        ui.label(hint(mode));
-        ui.add_space(8.0);
-        let available = self.available();
-        let page = self.pages.get_mut(&mode).unwrap();
-        let mut scan = false;
-        let mut choose = false;
-        let mut append = false;
-        ui.add_enabled_ui(available, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                if mode == Mode::Space {
-                    if let Some(h) = home() {
-                        egui::ComboBox::from_id_salt("scope")
-                            .selected_text("Ambito")
-                            .show_ui(ui, |ui| {
-                                for (label, p) in [
-                                    ("Download", h.join("Downloads")),
-                                    ("Utente", h.clone()),
-                                    ("Library", h.join("Library")),
-                                    ("Applicazioni", PathBuf::from("/Applications")),
-                                ] {
-                                    if ui
-                                        .selectable_label(page.req.roots.first() == Some(&p), label)
-                                        .clicked()
-                                    {
-                                        page.invalidate();
-                                        page.history.clear();
-                                        page.req.roots = vec![p];
-                                    }
-                                }
-                            });
-                    }
-                    if ui
-                        .add_enabled(!page.history.is_empty(), egui::Button::new("Indietro"))
-                        .clicked()
-                    {
-                        let parent = page.history.pop().unwrap();
-                        page.req.roots = vec![parent];
-                        scan = true;
-                    }
-                }
-                if matches!(mode, Mode::Space | Mode::Large | Mode::Duplicates) {
-                    choose = ui.button("Scegli cartella…").clicked();
-                    if matches!(mode, Mode::Large | Mode::Duplicates) && !page.req.roots.is_empty()
-                    {
-                        append = ui.button("Aggiungi cartella…").clicked();
-                    }
-                }
-                if matches!(mode, Mode::Large | Mode::Duplicates) {
-                    let options: &[u64] = if mode == Mode::Large {
-                        &[100_000_000, 500_000_000, 1_000_000_000]
-                    } else {
-                        &[0, 1_000, 1_000_000, 100_000_000]
-                    };
-                    let label = |n| if n == 0 { "Tutti".to_owned() } else { size(n) };
-                    egui::ComboBox::from_id_salt("threshold")
-                        .selected_text(label(page.req.min_bytes))
-                        .show_ui(ui, |ui| {
-                            for &n in options {
-                                if ui
-                                    .selectable_value(&mut page.req.min_bytes, n, label(n))
-                                    .changed()
-                                {
-                                    page.invalidate();
-                                }
-                            }
-                        });
-                }
-                if ui
-                    .add_enabled(!page.req.roots.is_empty(), egui::Button::new("Analizza"))
-                    .clicked()
-                {
-                    scan = true;
-                }
-            });
-        });
-        if page.req.roots.is_empty() {
-            ui.small("Scegli una cartella per iniziare.");
-        }
-        let mut remove = None;
-        egui::ScrollArea::vertical()
-            .id_salt(("radici", mode))
-            .max_height(84.)
-            .show(ui, |ui| {
-                for (index, p) in page.req.roots.iter().enumerate() {
-                    ui.horizontal_wrapped(|ui| {
-                        if matches!(mode, Mode::Duplicates | Mode::Large)
-                            && page.req.roots.len() > 1
-                            && ui
-                                .add_enabled(available, egui::Button::new("Rimuovi").small())
-                                .on_hover_text("Rimuovi questa cartella dall’analisi")
-                                .clicked()
-                        {
-                            remove = Some(index);
-                        }
-                        ui.small(p.to_string_lossy());
-                    });
-                }
-            });
-        if let Some(index) = remove {
-            page.req.roots.remove(index);
-            page.invalidate();
-        }
-        ui.separator();
-        if choose || append {
-            self.append_root = append;
-            self.picker.open(mode, ctx);
-            return;
-        }
-        if scan {
-            self.launch_scan(mode, ctx);
-            return;
-        }
-        let Some(results) = page.result.clone() else {
-            ui.add_space(18.0);
-            ui.label(if self.active.as_ref().is_some_and(|a| a.mode == mode) {
-                "Analisi in corso…"
-            } else {
-                "Nessun risultato. Avvia un’analisi per esaminare questa sezione."
-            });
-            return;
-        };
-        let r = &results.report;
-        ui.horizontal_wrapped(|ui| {
-            ui.strong(item_count(r.items.len()));
-            ui.label(format!("{} visitati · {} esclusi", r.visited, r.skipped));
-            if mode == Mode::Duplicates {
-                ui.label(format!("{} gruppi", results.groups.len()));
-            }
-            if mode == Mode::Space {
-                ui.label(format!("{} allocati", size(results.total)));
-                if let Some(root) = page.req.roots.first() {
-                    if let Some(previous) = self.baselines.get(root) {
-                        let difference = results.total.abs_diff(*previous);
-                        let direction = if results.total >= *previous {
-                            "+"
-                        } else {
-                            "−"
-                        };
-                        ui.label(format!(
-                            "{direction}{} dalla misura salvata",
-                            size(difference)
-                        ));
-                    }
-                    if ui
-                        .small_button("Salva misura")
-                        .on_hover_text(
-                            "Usa il totale di questa cartella come riferimento per la sessione.",
-                        )
-                        .clicked()
-                    {
-                        self.baselines.insert(root.clone(), results.total);
-                    }
-                }
-            }
-        });
-        if r.errors > 0 || r.cancelled {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                format!("Copertura parziale · {} errori", r.errors),
-            );
-        }
-        if !r.notes.is_empty() {
-            ui.collapsing("Dettagli dell’analisi", |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("notes")
-                    .max_height(90.0)
-                    .show_rows(ui, 18.0, r.notes.len(), |ui, rows| {
-                        for i in rows {
-                            ui.add(egui::Label::new(&r.notes[i]).truncate())
-                                .on_hover_text(&r.notes[i]);
-                        }
-                    });
-            });
-        }
-        let search_id = egui::Id::new(("ricerca", mode));
-        ui.horizontal_wrapped(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut page.query)
-                    .id(search_id)
-                    .hint_text("Cerca nel percorso…"),
-            );
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
-                ui.memory_mut(|m| m.request_focus(search_id));
-            }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                page.query.clear();
-            }
-            ui.small(if page.query != page.applied {
-                "Ricerca…".to_owned()
-            } else {
-                format!("{} visibili", page.count())
-            });
-        });
-        if mode == Mode::Duplicates {
-            ui.horizontal_wrapped(|ui| {
-                ui.small("Ordina gruppi");
-                egui::ComboBox::from_id_salt("ordine-duplicati")
-                    .selected_text(if page.sort_by_path {
-                        "Primo percorso"
-                    } else {
-                        "Spazio extra"
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut page.sort_by_path, false, "Spazio extra");
-                        ui.selectable_value(&mut page.sort_by_path, true, "Primo percorso");
-                    });
-            });
-        }
-        if mode != Mode::Space {
-            ui.horizontal_wrapped(|ui| {
-                if mode != Mode::Apps
-                    && ui
-                        .add_enabled(
-                            page.query == page.applied && page.count() > 0,
-                            egui::Button::new(if mode == Mode::Duplicates {
-                                "Seleziona extra visibili"
-                            } else {
-                                "Seleziona visibili"
-                            }),
-                        )
-                        .clicked()
-                {
-                    page.select_visible();
-                }
-                if ui
-                    .add_enabled(
-                        !page.selected.is_empty(),
-                        egui::Button::new("Deseleziona tutto"),
-                    )
-                    .clicked()
-                {
-                    page.selected.clear();
-                    page.selected_visible = 0;
-                }
-                if ui
-                    .add_enabled(
-                        !page.selected.is_empty() && available,
-                        egui::Button::new("Rivedi la selezione"),
-                    )
-                    .clicked()
-                {
-                    self.review = Review::snapshot(page);
-                }
-            });
-            ui.small(format!(
-                "{} selezionati · {} nascosti dal filtro",
-                page.selected.len(),
-                page.selected.len().saturating_sub(page.selected_visible)
-            ));
-        }
-        ui.separator();
-        let mut reveal = None;
-        let mut drill = None;
-        if mode == Mode::Space && page.query.is_empty() && results.total > 0 {
-            ui.collapsing("Mappa proporzionale", |ui| {
-                if let Some(index) = crate::treemap::show(ui, &r.items, results.total) {
-                    let item = &r.items[index];
-                    if available && item.identity.is_dir() {
-                        drill = Some(item.path.clone());
-                    } else if !item.identity.is_dir() {
-                        reveal = Some(item.path.clone());
-                    }
-                }
-            });
-        }
-        let rows = page.count();
-        egui::ScrollArea::vertical()
-            .id_salt(("risultati", mode))
-            .auto_shrink([false, false])
-            .show_rows(ui, 48.0, rows, |ui, range| {
-                for row in range {
-                    let i = page.row_id(row);
-                    let item = &r.items[i];
-                    ui.push_id(i, |ui| {
-                        ui.set_min_height(48.0);
-                        ui.horizontal(|ui| {
-                            if mode != Mode::Space {
-                                let protected = item.group.and_then(|g| page.keeper(g)) == Some(i);
-                                let mut chosen = page.selected.contains(&i);
-                                if crate::extras::file_checkbox(ui, &mut chosen, !protected, &item.path)
-                                    .on_hover_text("Seleziona per il Cestino")
-                                    .changed()
-                                {
-                                    page.select(i, chosen);
-                                }
-                            }
-                            let name = item
-                                .path
-                                .file_name()
-                                .unwrap_or(item.path.as_os_str())
-                                .to_string_lossy();
-                            let reserve = if mode == Mode::Duplicates {
-                                265.0
-                            } else {
-                                170.0
-                            };
-                            let width = (ui.available_width() - reserve).max(60.0);
-                            if mode == Mode::Space && item.identity.is_dir() {
-                                if ui
-                                    .add_enabled(
-                                        available,
-                                        egui::Button::new(
-                                            egui::RichText::new(name.as_ref()).strong(),
-                                        )
-                                        .truncate(),
-                                    )
-                                    .on_hover_text(item.path.to_string_lossy())
-                                    .clicked()
-                                {
-                                    drill = Some(item.path.clone());
-                                }
-                            } else {
-                                ui.add_sized(
-                                    [width, 18.0],
-                                    egui::Label::new(egui::RichText::new(name.as_ref()).strong())
-                                        .truncate(),
-                                );
-                            }
-                            ui.label(size(item.bytes));
-                            if let Some(g) = item.group {
-                                if page.keeper(g) == Some(i) {
-                                    ui.small("Copia protetta");
-                                } else if ui.small_button("Conserva questa").clicked() {
-                                    page.keepers.insert(g, i);
-                                    page.select(i, false);
-                                }
-                            }
-                            if ui.small_button("Finder").clicked() {
-                                reveal = Some(item.path.clone());
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            if mode == Mode::Space {
-                                let max = results.total.max(1);
-                                ui.add(
-                                    egui::ProgressBar::new(item.bytes as f32 / max as f32)
-                                        .desired_width(65.0)
-                                        .desired_height(5.0),
-                                );
-                                if let Some(stats) = r.space.get(&item.path) {
-                                    let details = format!("{} file · {} logici · {} hard link già conteggiati · {} esclusi · {} errori", stats.files,size(stats.logical_bytes),stats.hardlinks,stats.skipped,stats.errors);
-                                    let summary = if stats.errors > 0 { format!("Parziale · {} errori",stats.errors) }
-                                        else { format!("{} file · {} logici",stats.files,size(stats.logical_bytes)) };
-                                    ui.small(summary).on_hover_text(details);
-                                }
-                            }
-                            if let Some(g) = item.group {
-                                ui.small(format!("Gruppo {g}"));
-                            }
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(item.path.to_string_lossy())
-                                        .small()
-                                        .weak(),
-                                )
-                                .truncate(),
-                            )
-                            .on_hover_text(item.path.to_string_lossy());
-                        });
-                    });
-                }
-            });
-        if let Some(p) = drill {
-            if let Some(parent) = page.req.roots.first() {
-                page.history.push(parent.clone());
-            }
-            page.req.roots = vec![p];
-            self.launch_scan(mode, ctx);
-        }
-        if let Some(p) = reveal {
-            self.reveal(p, ctx);
-        }
-        self.refresh_filter(mode, ctx);
-    }
-
-    fn review_page(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let review = self.review.as_ref().unwrap();
-        ui.heading("Rivedi la selezione");
-        ui.label(format!(
-            "{} · {} · {}",
-            review.label,
-            item_count(review.moves.len()),
-            size(review.total)
-        ));
-        if review.cloud {
-            ui.colored_label(ui.visuals().warn_fg_color,"Alcuni percorsi appartengono a cartelle sincronizzate, come Dropbox o iCloud. Lo spostamento può rimuoverli anche dagli altri dispositivi e per chi condivide la cartella.");
-        }
-        ui.label("Lo spazio si libera dopo lo svuotamento del Cestino dal Finder.");
-        let mut back = false;
-        let mut proceed = false;
-        ui.horizontal_wrapped(|ui| {
-            if self.confirm {
-                ui.strong(format!(
-                    "Confermi lo spostamento di {}?",
-                    item_count(review.moves.len())
-                ));
-                if ui.button("Annulla conferma").clicked() {
-                    self.confirm = false;
-                }
-                proceed = ui.button("Conferma e sposta nel Cestino").clicked();
-            } else {
-                back = ui.button("Torna alla selezione").clicked();
-                if ui.button("Sposta nel Cestino…").clicked() {
-                    self.confirm = true;
-                }
-            }
-        });
-        ui.separator();
-        let end = review.rows.len();
-        let mut reveal = None;
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show_rows(ui, 48.0, end, |ui, rows| {
-                for row in rows {
-                    let (i, keep) = review.rows[row];
-                    let item = &review.data.report.items[i];
-                    ui.push_id(i, |ui| {
-                        ui.set_min_height(48.0);
-                        ui.horizontal(|ui| {
-                            ui.strong(if keep { "Resta sul Mac" } else { "Al Cestino" });
-                            if let Some(g) = item.group {
-                                ui.small(format!("Gruppo {g}"));
-                            }
-                            if keep
-                                && item.group.and_then(|g| review.keepers.get(&g)).copied()
-                                    == Some(i)
-                            {
-                                ui.small("Copia protetta");
-                            }
-                            ui.label(size(item.bytes));
-                            if ui.small_button("Finder").clicked() {
-                                reveal = Some(item.path.clone());
-                            }
-                        });
-                        ui.add(egui::Label::new(item.path.to_string_lossy()).truncate())
-                            .on_hover_text(item.path.to_string_lossy());
-                    });
-                }
-            });
-        if back {
-            self.review = None;
-            self.confirm = false;
-        }
-        if proceed {
-            let snapshot = self.review.take().unwrap();
-            self.trash(snapshot, ctx);
-        }
-        if let Some(path) = reveal {
-            self.reveal(path, ctx);
-        }
-    }
 }
 
 #[derive(Default)]
@@ -1628,6 +1058,7 @@ impl eframe::App for Lindo {
             self.request_disk_usage(ctx);
         }
         self.receive();
+        self.assessment.poll();
         self.system.monitor_alert(ctx);
         self.desktop.refresh(ctx, self.disk);
         self.picker.poll();
@@ -1639,90 +1070,23 @@ impl eframe::App for Lindo {
             }
         }
         let browsing = self.review.is_none() && !self.picker.visible() && !self.cleaning;
-        let sections = [
-            ("Panoramica", None),
-            ("Mappa dello spazio", Some(Mode::Space)),
-            ("Cache dei browser", Some(Mode::Cache)),
-            ("Log", Some(Mode::Logs)),
-            ("File grandi", Some(Mode::Large)),
-            ("Duplicati", Some(Mode::Duplicates)),
-            ("Applicazioni", Some(Mode::Apps)),
-        ];
-        if browsing {
-            let keys = [
-                egui::Key::Num1,
-                egui::Key::Num2,
-                egui::Key::Num3,
-                egui::Key::Num4,
-                egui::Key::Num5,
-                egui::Key::Num6,
-                egui::Key::Num7,
-            ];
-            for ((_, m), key) in sections.iter().zip(keys) {
-                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key)) {
-                    self.extra = None;
-                    self.mode = *m;
-                }
-            }
-        }
-        egui::SidePanel::left("navigazione")
-            .resizable(false)
-            .exact_width(155.0)
-            .show(ctx, |ui| {
-                ui.add_space(10.0);
-                ui.heading("Lindo");
-                ui.add_space(14.0);
-                ui.add_enabled_ui(browsing, |ui| {
-                    for (label, m) in sections {
-                        if m == Some(Mode::Cache) {
-                            ui.add_space(8.0);
-                            ui.separator();
-                            ui.small("PULIZIA");
-                        }
-                        if ui
-                            .selectable_label(self.extra.is_none() && self.mode == m, label)
-                            .clicked()
-                        {
-                            self.extra = None;
-                            self.mode = m;
-                        }
-                    }
-                    ui.separator();
-                    for (extra, label) in EXTRAS {
-                        if matches!(
-                            extra,
-                            Extra::Reset
-                                | Extra::Versions
-                                | Extra::Legacy
-                                | Extra::MailTrash
-                                | Extra::SystemJunk
-                                | Extra::Trim
-                        ) {
-                            continue;
-                        }
-                        if ui
-                            .selectable_label(self.extra == Some(extra), label)
-                            .clicked()
-                        {
-                            self.extra = Some(extra);
-                            self.mode = None;
-                        }
-                    }
-                });
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.small("Scorciatoie").on_hover_text(
-                        "⌘1 fino a ⌘7: cambia sezione. ⌘F: cerca. Esc: cancella ricerca.",
-                    );
-                });
+        self.sidebar(ctx, browsing);
+        let scan_page = !self.searching
+            && self.review.is_none()
+            && self.extra.is_none()
+            && !self.picker.visible()
+            && self.active.as_ref().is_some_and(|a| {
+                self.mode == Some(a.mode)
+                    || (self.mode.is_none() && self.destination == design::Destination::Home)
             });
-        if self.active.is_some()
+        if (self.active.is_some() && !scan_page)
             || self.cleaning
             || !self.status.is_empty()
             || !self.failures.is_empty()
         {
             egui::TopBottomPanel::bottom("attivita").show(ctx, |ui| {
                 let mut stop = false;
-                if let Some(a) = &self.active {
+                if let Some(a) = self.active.as_ref().filter(|_| !scan_page) {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(format!(
                             "{} · {} voci visitate",
@@ -1788,114 +1152,168 @@ impl eframe::App for Lindo {
                 }
             });
         }
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(10.0);
-            if self.picker.visible() {
-                if let Some((mode, path)) = self.picker.draw(ui, ctx) {
-                    let page = self.pages.get_mut(&mode).unwrap();
-                    page.choose_root(path, self.append_root);
-                    self.append_root = false;
-                }
-            } else if self.review.is_some() {
-                self.review_page(ui, ctx);
-            } else if let Some(extra) = self.extra {
-                let proposal = match extra {
-                    Extra::Reset => {
-                        if ui.small_button("‹ Applicazioni").clicked() {
-                            self.extra = None;
-                            self.mode = Some(Mode::Apps);
+        let gutter = if ctx.screen_rect().width() < 830. {
+            16
+        } else {
+            32
+        };
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(design::CANVAS)
+                    .inner_margin(egui::Margin {
+                        left: gutter,
+                        right: gutter,
+                        top: 0,
+                        bottom: 12,
+                    }),
+            )
+            .show(ctx, |ui| {
+                self.toolbar(ui, browsing);
+                ui.add_space(3.);
+                let reviewing = self.review.is_some();
+                ui.scope(|ui| {
+                    if reviewing {
+                        ui.disable();
+                    }
+                    if self.picker.visible() {
+                        if let Some((mode, path)) = self.picker.draw(ui, ctx) {
+                            let page = self.pages.get_mut(&mode).unwrap();
+                            page.choose_root(path, self.append_root);
+                            self.append_root = false;
                         }
-                        if ui.small_button("Alleggerisci un’app…").clicked() {
-                            self.extra = Some(Extra::Trim);
+                    } else if self.searching {
+                        ui.heading("Cerca strumenti");
+                        egui::ScrollArea::vertical()
+                            .id_salt("tool-search")
+                            .show(ui, |ui| self.catalog(ui, None));
+                        if self.mode.is_some() || self.extra.is_some() {
+                            self.searching = false;
+                            self.search_origin = None;
+                            self.tool_query.clear();
                         }
-                        self.reset.show(ui, ctx);
-                        None
-                    }
-                    Extra::Versions => {
-                        if ui.small_button("‹ Mappa dello spazio").clicked() {
-                            self.extra = None;
-                            self.mode = Some(Mode::Space);
-                        }
-                        self.versions.show(ui, ctx);
-                        None
-                    }
-                    Extra::Updates => {
-                        self.vendor.show(ui, ctx);
-                        None
-                    }
-                    Extra::Remote => {
-                        self.remote.show(ui, ctx);
-                        None
-                    }
-                    Extra::Trim => {
-                        if ui.small_button("‹ Ripristino app").clicked() {
-                            self.extra = Some(Extra::Reset);
-                        }
-                        self.trim.show(ui, ctx);
-                        None
-                    }
-                    Extra::MailTrash => {
-                        if ui.small_button("‹ Mail e browser").clicked() {
-                            self.extra = Some(Extra::Accounts);
-                        }
-                        self.mail_trash.show(ui, ctx);
-                        None
-                    }
-                    Extra::SystemJunk => {
-                        if ui.small_button("‹ Pulizia avanzata").clicked() {
-                            self.extra = Some(Extra::Junk);
-                        }
-                        self.system_junk.show(ui, ctx);
-                        None
-                    }
-                    Extra::Accounts => {
-                        if ui.small_button("Cestino di Mail…").clicked() {
-                            self.extra = Some(Extra::MailTrash);
-                        }
-                        self.accounts.show(ui, ctx);
-                        None
-                    }
-                    Extra::Clutter => self.clutter.show(ui, ctx),
-                    Extra::Junk => {
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.small_button("Preferenze e avvii obsoleti…").clicked() {
-                                self.extra = Some(Extra::Legacy);
+                    } else if scan_page {
+                        egui::ScrollArea::vertical()
+                            .id_salt("active-scan")
+                            .show(ui, |ui| self.scanning(ui, ctx));
+                        ctx.request_repaint_after(Duration::from_millis(120));
+                    } else if let Some(extra) = self.extra {
+                        let proposal = match extra {
+                            Extra::Reset => {
+                                if ui.small_button("‹ Applicazioni").clicked() {
+                                    self.extra = None;
+                                    self.mode = Some(Mode::Apps);
+                                }
+                                if ui.small_button("Alleggerisci un’app…").clicked() {
+                                    self.extra = Some(Extra::Trim);
+                                }
+                                self.reset.show(ui, ctx);
+                                None
                             }
-                            if ui.small_button("Cache e log di sistema…").clicked() {
-                                self.extra = Some(Extra::SystemJunk);
+                            Extra::Versions => {
+                                if ui.small_button("‹ Mappa dello spazio").clicked() {
+                                    self.extra = None;
+                                    self.mode = Some(Mode::Space);
+                                }
+                                self.versions.show(ui, ctx);
+                                None
                             }
-                        });
-                        self.junk.show(ui, ctx)
-                    }
-                    Extra::Legacy => {
-                        if ui.small_button("‹ Pulizia avanzata").clicked() {
-                            self.extra = Some(Extra::Junk);
+                            Extra::Updates => {
+                                self.vendor.show(ui, ctx);
+                                None
+                            }
+                            Extra::Remote => {
+                                self.remote.show(ui, ctx);
+                                None
+                            }
+                            Extra::Trim => {
+                                if ui.small_button("‹ Ripristino app").clicked() {
+                                    self.extra = Some(Extra::Reset);
+                                }
+                                self.trim.show(ui, ctx);
+                                None
+                            }
+                            Extra::MailTrash => {
+                                if ui.small_button("‹ Mail e browser").clicked() {
+                                    self.extra = Some(Extra::Accounts);
+                                }
+                                self.mail_trash.show(ui, ctx);
+                                None
+                            }
+                            Extra::SystemJunk => {
+                                if ui.small_button("‹ Pulizia avanzata").clicked() {
+                                    self.extra = Some(Extra::Junk);
+                                }
+                                self.system_junk.show(ui, ctx);
+                                None
+                            }
+                            Extra::Accounts => {
+                                if ui.small_button("Cestino di Mail…").clicked() {
+                                    self.extra = Some(Extra::MailTrash);
+                                }
+                                self.accounts.show(ui, ctx);
+                                None
+                            }
+                            Extra::Clutter => self.clutter.show(ui, ctx),
+                            Extra::Junk => {
+                                ui.horizontal_wrapped(|ui| {
+                                    if ui.small_button("Preferenze e avvii obsoleti…").clicked() {
+                                        self.extra = Some(Extra::Legacy);
+                                    }
+                                    if ui.small_button("Cache e log di sistema…").clicked() {
+                                        self.extra = Some(Extra::SystemJunk);
+                                    }
+                                });
+                                self.junk.show(ui, ctx)
+                            }
+                            Extra::Legacy => {
+                                if ui.small_button("‹ Pulizia avanzata").clicked() {
+                                    self.extra = Some(Extra::Junk);
+                                }
+                                self.legacy.show(ui, ctx);
+                                None
+                            }
+                            Extra::System => {
+                                self.system.show(ui, ctx);
+                                None
+                            }
+                        };
+                        if let Some(request) = proposal {
+                            if self.available() {
+                                self.confirm = false;
+                                self.review = Review::from_proposal(request);
+                                if self.review.is_none() {
+                                    self.status = "Selezione cambiata. Ripeti l’analisi.".into();
+                                }
+                            } else {
+                                self.status = "Attendi la fine dell’operazione in corso.".into();
+                            }
                         }
-                        self.legacy.show(ui, ctx);
-                        None
-                    }
-                    Extra::System => {
-                        self.system.show(ui, ctx);
-                        None
-                    }
-                };
-                if let Some(request) = proposal {
-                    if self.available() {
-                        self.confirm = false;
-                        self.review = Review::from_proposal(request);
-                        if self.review.is_none() {
-                            self.status = "Selezione cambiata. Ripeti l’analisi.".into();
-                        }
+                    } else if let Some(m) = self.mode {
+                        self.section(ui, m, ctx);
                     } else {
-                        self.status = "Attendi la fine dell’operazione in corso.".into();
+                        let dest = self.destination;
+                        egui::ScrollArea::vertical()
+                            .id_salt(("destination", dest.label()))
+                            .show(ui, |ui| match dest {
+                                design::Destination::Home => self.overview(ui, ctx),
+                                design::Destination::Settings => {
+                                    ui.heading("Impostazioni");
+                                    ui.add_space(16.);
+                                    self.desktop.controls(ui, ctx, self.disk);
+                                }
+                                _ => {
+                                    ui.heading(dest.label());
+                                    ui.add_space(12.);
+                                    self.catalog(ui, Some(dest.label()));
+                                }
+                            });
                     }
+                });
+                if self.review.is_some() {
+                    self.review_page(ui, ctx);
                 }
-            } else if let Some(m) = self.mode {
-                self.section(ui, m, ctx);
-            } else {
-                egui::ScrollArea::vertical().show(ui, |ui| self.overview(ui, ctx));
-            }
-        });
+            });
         if let Some(entered) = probe_frame {
             self.fixture_frame(ctx, entered);
         }
@@ -1918,7 +1336,10 @@ fn run_window(
     let window_start = fixture.as_ref().map(|_| std::time::Instant::now());
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([920.0, 640.0])
+            .with_inner_size([1080.0, 720.0])
+            .with_fullsize_content_view(true)
+            .with_title_shown(false)
+            .with_titlebar_shown(false)
             .with_min_inner_size([660.0, 460.0]),
         ..Default::default()
     };
@@ -1926,8 +1347,9 @@ fn run_window(
         "Lindo",
         options,
         Box::new(move |cc| {
-            if let Some(theme) = appearance {
-                cc.egui_ctx.set_theme(theme);
+            design::configure(&cc.egui_ctx);
+            {
+                let theme = appearance.unwrap_or(egui::Theme::Dark);
                 cc.egui_ctx
                     .send_viewport_cmd(egui::ViewportCommand::SetTheme(match theme {
                         egui::Theme::Dark => egui::SystemTheme::Dark,

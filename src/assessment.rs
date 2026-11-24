@@ -11,7 +11,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
     },
-    time::Duration,
 };
 
 const MODES: [Mode; 6] = [
@@ -91,6 +90,7 @@ impl Drop for Worker {
         self.stop.store(true, Ordering::Release);
     }
 }
+#[derive(Default)]
 pub(crate) struct Assessment {
     performance: bool,
     protection: bool,
@@ -102,22 +102,6 @@ pub(crate) struct Assessment {
     checks: Vec<CheckRow>,
     worker: Option<Worker>,
     notice: String,
-}
-impl Default for Assessment {
-    fn default() -> Self {
-        Self {
-            performance: true,
-            protection: true,
-            clam: false,
-            folder: String::new(),
-            core_busy: false,
-            cancel_request: false,
-            disks: Vec::new(),
-            checks: Vec::new(),
-            worker: None,
-            notice: String::new(),
-        }
-    }
 }
 fn validate_requests(requests: &[Request]) -> Result<(), String> {
     if requests.len() != MODES.len() || !MODES.iter().all(|m| requests.iter().any(|r| r.mode == *m))
@@ -271,7 +255,7 @@ impl Assessment {
         });
         true
     }
-    fn poll(&mut self) {
+    pub(crate) fn poll(&mut self) {
         let Some(worker) = &self.worker else {
             return;
         };
@@ -358,10 +342,6 @@ impl Assessment {
         ctx: &egui::Context,
         requests: &[Request],
     ) -> bool {
-        self.poll();
-        if self.worker.is_some() {
-            ctx.request_repaint_after(Duration::from_millis(150));
-        }
         let mut launch = false;
         let running = self.worker.is_some() || self.pending_core();
         let header =
@@ -407,7 +387,7 @@ impl Assessment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
     fn requests() -> Vec<Request> {
         MODES
             .into_iter()
@@ -429,6 +409,8 @@ mod tests {
     #[test]
     fn six_scopes_and_partial_auxiliary_failures_preserve_disk_results() {
         let mut ui = Assessment {
+            performance: true,
+            protection: true,
             clam: true,
             folder: "/synthetic/Downloads".into(),
             ..Default::default()
@@ -460,7 +442,10 @@ mod tests {
     }
     #[test]
     fn cancelled_worker_cannot_replace_a_new_session() {
-        let mut ui = Assessment::default();
+        let mut ui = Assessment {
+            performance: true,
+            ..Default::default()
+        };
         let req = requests();
         let ctx = egui::Context::default();
         let (started, observed) = mpsc::channel();
