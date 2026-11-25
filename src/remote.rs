@@ -603,16 +603,6 @@ impl Remote {
                 .filter(|r| self.selected.contains(&r.id))
                 .cloned()
                 .collect::<Vec<_>>();
-            egui::ScrollArea::vertical().max_height(180.).show_rows(
-                ui,
-                22.,
-                items.len(),
-                |ui, range| {
-                    for row in &items[range] {
-                        ui.label(format!("{} · {} B", row.name, row.bytes));
-                    }
-                },
-            );
             if ui.button(confirm).clicked() {
                 self.review = None;
                 if let Some(a) = self.active.clone() {
@@ -627,9 +617,22 @@ impl Remote {
                             Review::Trash => remove(call, &a, &trail, &items),
                         }))
                     });
+                    return;
                 }
             } else if ui.button("Indietro").clicked() {
                 self.review = None;
+            }
+            if self.review.is_some() {
+                egui::ScrollArea::vertical().max_height(180.).show_rows(
+                    ui,
+                    22.,
+                    items.len(),
+                    |ui, range| {
+                        for row in &items[range] {
+                            ui.label(format!("{} · {} B", row.name, row.bytes));
+                        }
+                    },
+                );
             }
             return;
         }
@@ -701,23 +704,19 @@ impl Remote {
         if self.job.is_some() {
             return;
         }
-        if ui
-            .add_enabled(
-                !self.selected.is_empty(),
-                egui::Button::new(format!("Sposta in revisione ({})", self.selected.len())),
-            )
-            .clicked()
-        {
-            self.review = Some(Review::Move(review_name()));
-        }
-        if ui
-            .add_enabled(
-                !self.selected.is_empty(),
-                egui::Button::new(format!("Rimuovi dal cloud ({})", self.selected.len())),
-            )
-            .clicked()
-        {
-            self.review = Some(Review::Trash);
+        if !self.selected.is_empty() {
+            if ui
+                .button(format!("Sposta in revisione ({})", self.selected.len()))
+                .clicked()
+            {
+                self.review = Some(Review::Move(review_name()));
+            }
+            if ui
+                .button(format!("Rimuovi dal cloud ({})", self.selected.len()))
+                .clicked()
+            {
+                self.review = Some(Review::Trash);
+            }
         }
         let mut enter = None;
         let mut names = HashSet::new();

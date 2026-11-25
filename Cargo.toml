@@ -1,6 +1,6 @@
 [package]
 name = "lindo"
-version = "0.9.3"
+version = "0.9.5"
 edition = "2021"
 license = "MIT"
 description = "Local disk inspection and reviewed cleanup for macOS"

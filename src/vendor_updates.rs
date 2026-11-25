@@ -500,7 +500,10 @@ fn launch(app: &App, stop: &AtomicBool) -> Result<String, String> {
     if out.code != Some(0) {
         return Err("Apertura dell’app non riuscita.".into());
     }
-    Ok("App aperta. Usa il suo comando Cerca aggiornamenti.".into())
+    Ok(
+        "Richiesta di apertura inviata a macOS. Nell’app usa il comando Cerca aggiornamenti."
+            .into(),
+    )
 }
 enum ResultView {
     Apps(Vec<App>, usize),
@@ -641,8 +644,11 @@ impl VendorUpdates {
                 if stop.load(Ordering::Acquire) {
                     return Err("Verifica annullata.".into());
                 }
-                let message =
-                    check(&app, stop).unwrap_or_else(|e| format!("Verifica incompleta. {e}"));
+                let result = check(&app, stop);
+                if stop.load(Ordering::Acquire) {
+                    return Err("Verifica annullata.".into());
+                }
+                let message = result.unwrap_or_else(|e| format!("Verifica incompleta. {e}"));
                 Ok(ResultView::Message(app, message))
             });
         }

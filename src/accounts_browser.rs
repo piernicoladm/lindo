@@ -40,7 +40,13 @@ function run(argv) {
     for (const row of rows) verified(row);
     let closed=0;
     for (const row of rows) {
-        try { verified(row).close(); ++closed; }
+        try {
+            verified(row).close();
+            const win=app.windows.byId(row.win);
+            if(!win.exists() || win.tabs.byId(row.id).exists() || !win.tabs.byId(row.keep).exists())
+                throw Error("Chiusura non confermata. Controlla le schede in Chrome.");
+            ++closed;
+        }
         catch(e) { return JSON.stringify({closed,error:String(e)}); }
     }
     return JSON.stringify({closed});

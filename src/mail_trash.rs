@@ -387,13 +387,6 @@ impl MailTrash {
                 p.box_name,
                 self.chosen.len()
             ));
-            egui::ScrollArea::vertical()
-                .max_height(145.)
-                .show(ui, |ui| {
-                    for &i in &self.chosen {
-                        ui.label(&p.rows[i].subject);
-                    }
-                });
             if ui.button("Evidenzia questi messaggi in Mail").clicked() {
                 let rows = self
                     .chosen
@@ -418,6 +411,15 @@ impl MailTrash {
                 });
             } else if ui.button("Torna all’elenco").clicked() {
                 self.review = false;
+            }
+            if let Some(p) = &self.preview {
+                egui::ScrollArea::vertical()
+                    .max_height(145.)
+                    .show(ui, |ui| {
+                        for &i in &self.chosen {
+                            ui.label(&p.rows[i].subject);
+                        }
+                    });
             }
             return;
         }

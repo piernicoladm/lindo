@@ -330,6 +330,7 @@ fn execute(action: Action, cancel: &AtomicBool) -> Result<Report, String> {
 
 type JobResult = Result<Report, String>;
 struct Job {
+    action: Action,
     cancel: Arc<AtomicBool>,
     rx: mpsc::Receiver<JobResult>,
 }
@@ -347,6 +348,7 @@ pub(crate) struct SystemTools {
     monitor: folder_monitor::Monitor,
     job: Option<Job>,
     report: Option<Report>,
+    scan_findings: Vec<security_scan::Finding>,
     message: String,
 }
 impl SystemTools {
@@ -368,6 +370,7 @@ impl SystemTools {
         if !matches!(action, Action::Open(_)) {
             self.report = None;
         }
+        let job_action = action.clone();
         let spawn = std::thread::Builder::new()
             .name("lindo-system".into())
             .spawn(move || {
@@ -375,7 +378,13 @@ impl SystemTools {
                 repaint.request_repaint();
             });
         match spawn {
-            Ok(_) => self.job = Some(Job { cancel, rx }),
+            Ok(_) => {
+                self.job = Some(Job {
+                    action: job_action,
+                    cancel,
+                    rx,
+                })
+            }
             Err(e) => self.message = format!("Impossibile avviare il controllo: {e}"),
         }
     }
@@ -400,10 +409,18 @@ impl SystemTools {
                 Err(mpsc::TryRecvError::Disconnected) => Some(Err("Operazione interrotta.".into())),
             };
             if let Some(result) = received {
-                self.job = None;
+                let job = self.job.take().unwrap();
                 match result {
                     Ok(r) if r.opened => self.message = r.text,
-                    Ok(r) => {
+                    Ok(mut r) => {
+                        match &job.action {
+                            Action::Scan(_) => self.scan_findings = std::mem::take(&mut r.findings),
+                            Action::Maintenance(Mutation::Detected(done)) => {
+                                self.scan_findings.retain(|finding| finding != done);
+                                self.monitor.resolve(done);
+                            }
+                            _ => {}
+                        }
                         self.report = Some(r);
                         self.message.clear();
                     }
@@ -447,6 +464,18 @@ impl SystemTools {
             self.report = None;
         }
         ui.separator();
+        if let Some(job) = &self.job {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                if ui.button("Annulla").clicked() {
+                    job.cancel.store(true, Ordering::Release);
+                }
+            });
+            ctx.request_repaint_after(Duration::from_millis(180));
+        }
+        if !self.message.is_empty() {
+            ui.label(&self.message);
+        }
         egui::ScrollArea::vertical().id_salt("system_scroll").show(ui, |ui| {
             match self.section {
                 Section::Storage => {
@@ -499,10 +528,14 @@ impl SystemTools {
                     for item in packages {self.propose(ui,item);}
                 }
                 Section::Protection => {
+                    let mut target_changed = false;
                     if self.job.is_none() {
                         if let Some(path) = ctx.input(|i| i.raw.dropped_files.first().and_then(|f| f.path.clone())) {
                             match path.to_str() {
-                                Some(p) => self.file = p.to_owned(),
+                                Some(p) => {
+                                    target_changed = p != self.file;
+                                    self.file = p.to_owned();
+                                }
                                 None => self.message = "Il nome del file contiene caratteri non supportati.".into(),
                             }
                         }
@@ -516,12 +549,19 @@ impl SystemTools {
                     ui.add_space(8.0);
                     ui.strong("Scansione locale con ClamAV");
                     ui.label("Trascina un file o una cartella dal Finder oppure inserisci il percorso. Limiti per cartella: 2.000 file, 20.000 voci e 15 minuti. Sono esclusi i file oltre 64 MiB, i pacchetti, i percorsi cloud e le aree protette. Le rilevazioni rimangono disponibili nel rapporto.");
-                    ui.add(egui::TextEdit::singleline(&mut self.file).hint_text("Percorso del file o della cartella").desired_width(f32::INFINITY));
+                    let edit = ui.add_enabled(self.job.is_none(), egui::TextEdit::singleline(&mut self.file).hint_text("Percorso del file o della cartella").desired_width(f32::INFINITY));
+                    if target_changed || edit.changed() {
+                        self.report = None;
+                        self.message.clear();
+                    }
                     ui.add_enabled_ui(!self.file.is_empty(), |ui| {
                         self.button(ui,ctx,"Avvia scansione",Action::Scan(self.file.as_str().into()));
                     });
-                    let mut findings=self.report.as_ref().map(|r|r.findings.clone()).unwrap_or_default();
-                    findings.extend(self.monitor.show(ui,ctx,&self.file));
+                    let mut findings=self.scan_findings.clone();
+                    for finding in self.monitor.show(ui,ctx,&self.file) {
+                        if !findings.contains(&finding) { findings.push(finding); }
+                    }
+                    if !findings.is_empty() { ui.strong("Segnalazioni da rivedere"); }
                     for finding in findings {
                         ui.label(finding.path.display().to_string());
                         ui.horizontal_wrapped(|ui| {
@@ -544,14 +584,6 @@ impl SystemTools {
                     }
                 }
             }
-            if let Some(job) = &self.job {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    if ui.button("Annulla").clicked() { job.cancel.store(true,Ordering::Release); }
-                });
-                ctx.request_repaint_after(Duration::from_millis(180));
-            }
-            if !self.message.is_empty() { ui.label(&self.message); }
             if let Some(report) = &self.report {
                 ui.separator();
                 ui.add(egui::Label::new(egui::RichText::new(&report.text).monospace()).wrap().selectable(true));
@@ -563,6 +595,36 @@ impl SystemTools {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dropping_a_new_target_clears_the_previous_scan_result() {
+        let mut panel = SystemTools {
+            section: Section::Protection,
+            file: "/fixture/old".into(),
+            report: Some(Report {
+                opened: false,
+                text: "Nessuna firma rilevata.".into(),
+                providers: vec![],
+                snapshots: vec![],
+                packages: vec![],
+                findings: vec![],
+            }),
+            ..Default::default()
+        };
+        let input = egui::RawInput {
+            dropped_files: vec![egui::DroppedFile {
+                path: Some("/fixture/new".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| panel.show(ui, ctx));
+        });
+        assert_eq!(panel.file, "/fixture/new");
+        assert!(panel.report.is_none());
+    }
+
     #[test]
     fn scanner_requires_a_completed_scan_before_reporting_a_clean_result() {
         for (code, text, truncated, expected) in [

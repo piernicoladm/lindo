@@ -129,6 +129,7 @@ enum Outcome {
     Removed(String),
 }
 struct Job {
+    mutation: bool,
     stop: Arc<AtomicBool>,
     rx: Receiver<Result<Outcome, String>>,
 }
@@ -147,18 +148,28 @@ impl Drop for Ollama {
     }
 }
 impl Ollama {
+    pub(super) fn busy(&self) -> bool {
+        self.job.is_some()
+    }
     fn start(
         &mut self,
         ctx: &egui::Context,
+        mutation: bool,
         task: impl FnOnce(&AtomicBool) -> Result<Outcome, String> + Send + 'static,
     ) {
         let (tx, rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         self.job = Some(Job {
+            mutation,
             stop: stop.clone(),
             rx,
         });
-        self.status = "Consultazione di Ollama…".into();
+        self.status = if mutation {
+            "Rimozione e verifica del modello…"
+        } else {
+            "Consultazione di Ollama…"
+        }
+        .into();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let _ = tx.send(task(&stop));
@@ -169,8 +180,12 @@ impl Ollama {
         ui.label("Modelli gestiti dal servizio Ollama locale su 127.0.0.1:11434.");
         if let Some(j) = &self.job {
             ctx.request_repaint_after(Duration::from_millis(120));
-            if ui.button("Interrompi").clicked() {
+            if !j.mutation && ui.button("Interrompi").clicked() {
                 j.stop.store(true, Ordering::Release);
+                self.job = None;
+                self.status = "Consultazione interrotta.".into();
+                ui.label(&self.status);
+                return;
             }
             match j.rx.try_recv() {
                 Ok(out) => {
@@ -213,7 +228,7 @@ impl Ollama {
             ui.label("Ollama rimuove il modello dal catalogo locale senza passare dal Cestino. Per ripristinarlo dovrai riscaricarlo o ricrearlo. I dati condivisi con altri modelli possono restare su disco.");
             if ui.button("Conferma rimozione da Ollama").clicked() {
                 self.review = None;
-                self.start(ctx, move |stop| {
+                self.start(ctx, true, move |stop| {
                     let executable = cli()?;
                     remove(
                         &model,
@@ -248,7 +263,7 @@ impl Ollama {
         }
         if ui.button("Elenca i modelli Ollama").clicked() {
             self.models.clear();
-            self.start(ctx, |stop| {
+            self.start(ctx, false, |stop| {
                 cli()?;
                 api("tags", stop).map(Outcome::List)
             });

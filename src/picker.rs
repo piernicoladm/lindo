@@ -336,11 +336,14 @@ impl Picker {
             p.stop.store(true, Ordering::Release);
         }
     }
-    fn close(&mut self) {
+    fn invalidate_listing(&mut self) {
         self.stop();
-        self.mode = None;
         self.listing = None;
         self.error = None;
+    }
+    fn close(&mut self) {
+        self.invalidate_listing();
+        self.mode = None;
     }
     pub(crate) fn open(&mut self, mode: Mode, ctx: &egui::Context) {
         self.mode = Some(mode);
@@ -353,9 +356,7 @@ impl Picker {
     where
         F: FnOnce(&Path, &Path, &AtomicBool) -> io::Result<Listing> + Send + 'static,
     {
-        self.stop();
-        self.listing = None;
-        self.error = None;
+        self.invalidate_listing();
         self.text = path.to_string_lossy().into_owned();
         if self.running >= MAX_WORKERS {
             self.error=Some("Due letture sono ancora in attesa del sistema. Puoi annullare ora o riprovare quando una lettura termina.".into());
@@ -408,6 +409,9 @@ impl Picker {
                     .desired_width(350.0)
                     .hint_text("Percorso assoluto oppure ~/Cartella"),
             );
+            if field.changed() {
+                self.invalidate_listing();
+            }
             if ui.button("Vai").clicked()
                 || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
             {
@@ -470,6 +474,10 @@ impl Picker {
                 ui.label("macOS non ha ancora risposto. Controlla eventuali richieste di accesso, riprova oppure scegli Download.");
             }
             ctx.request_repaint_after(Duration::from_millis(200));
+        }
+        if self.pending.is_none() && self.listing.is_none() && self.error.is_none() && go.is_none()
+        {
+            ui.label("Premi Vai o Invio per verificare il percorso.");
         }
         if let Some(e) = &self.error {
             ui.colored_label(ui.visuals().warn_fg_color, e);
@@ -569,6 +577,39 @@ mod tests {
         assert!(!list(&home, &home, &stop).unwrap().selectable);
         stop.store(true, Ordering::Release);
         assert!(list(&root, &home, &stop).is_err());
+    }
+
+    #[test]
+    fn editing_the_path_clears_old_children_and_discards_late_results() {
+        let mut picker = Picker::new();
+        let old = PathBuf::from("/old");
+        picker.listing = Some(Listing {
+            path: old.clone(),
+            children: vec![old.join("child")],
+            ..Default::default()
+        });
+        picker.invalidate_listing();
+        assert!(picker.listing.is_none());
+        let ctx = egui::Context::default();
+        let (tx, rx) = mpsc::channel();
+        picker.submit(old, &ctx, move |path, _, _| {
+            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            Ok(Listing {
+                path: path.into(),
+                ..Default::default()
+            })
+        });
+        picker.text = "/new".into();
+        picker.invalidate_listing();
+        tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while picker.running > 0 && Instant::now() < deadline {
+            picker.poll();
+            std::thread::yield_now();
+        }
+        assert_eq!(picker.running, 0);
+        assert_eq!(picker.text, "/new");
+        assert!(picker.listing.is_none() && picker.error.is_none());
     }
 
     #[test]

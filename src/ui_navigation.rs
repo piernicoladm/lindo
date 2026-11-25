@@ -13,7 +13,8 @@ pub(super) fn mode_destination(mode: Mode) -> Destination {
 pub(super) fn extra_destination(extra: Extra) -> Destination {
     match extra {
         Extra::Updates | Extra::Reset | Extra::Trim => Destination::Apps,
-        Extra::System | Extra::Accounts | Extra::Remote => Destination::Tools,
+        Extra::System | Extra::Accounts | Extra::Remote | Extra::MailTrash => Destination::Tools,
+        Extra::Versions => Destination::Map,
         _ => Destination::Cleanup,
     }
 }
@@ -33,6 +34,11 @@ impl Lindo {
         self.extra = None;
         self.mode = (dest == Destination::Map).then_some(Mode::Space);
         self.destination = dest;
+    }
+
+    pub(super) fn open_mode(&mut self, mode: Mode) {
+        self.navigate(mode_destination(mode));
+        self.mode = Some(mode);
     }
 
     pub(super) fn sidebar(&mut self, ctx: &egui::Context, browsing: bool) {
@@ -191,6 +197,27 @@ impl Lindo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_tools_highlight_the_same_section_as_their_entry_points() {
+        assert_eq!(
+            extra_destination(Extra::MailTrash),
+            extra_destination(Extra::Accounts)
+        );
+        assert_eq!(
+            extra_destination(Extra::Versions),
+            mode_destination(Mode::Space)
+        );
+        assert_eq!(extra_destination(Extra::Trim), mode_destination(Mode::Apps));
+        assert_eq!(
+            extra_destination(Extra::SystemJunk),
+            extra_destination(Extra::Junk)
+        );
+        assert_eq!(
+            extra_destination(Extra::Legacy),
+            extra_destination(Extra::Junk)
+        );
+    }
 
     #[test]
     fn clicking_search_field_or_glass_opens_catalog_and_restores_origin() {

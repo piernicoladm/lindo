@@ -900,6 +900,11 @@ impl BundleTrim {
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     ui.spinner();
+                    ui.label(if job.mutation {
+                        "Operazione sul bundle in corso…"
+                    } else {
+                        "Verifica in corso…"
+                    });
                     if !job.mutation && ui.button("Interrompi verifica").clicked() {
                         job.stop.store(true, Ordering::Release);
                     }
@@ -1029,9 +1034,17 @@ impl BundleTrim {
             return;
         }
         ui.label("Scegli un’app firmata di terzi, chiusa e di tua proprietà. Lindo prepara una copia e verifica la firma originale prima di proporre l’installazione.");
-        if let Some(path) = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone())) {
+        if let Some(drop) = ctx.input(|i| {
+            crate::extras::single_drop(&i.raw.dropped_files).map(|r| r.map(Path::to_path_buf))
+        }) {
             self.clear();
-            self.input = path.to_string_lossy().into_owned();
+            match drop {
+                Ok(path) => self.input = path.to_string_lossy().into_owned(),
+                Err(reason) => {
+                    self.input.clear();
+                    self.notice = reason.into();
+                }
+            }
         }
         if ui
             .add(egui::TextEdit::singleline(&mut self.input).hint_text("/Applications/Nome.app"))
@@ -1046,7 +1059,13 @@ impl BundleTrim {
             self.work(ctx, false, |stop| open_archive(stop).map(Update::Message));
             return;
         }
-        if ui.button("Analizza bundle scelto").clicked() {
+        if ui
+            .add_enabled(
+                !self.input.trim().is_empty(),
+                egui::Button::new("Analizza bundle scelto"),
+            )
+            .clicked()
+        {
             self.clear();
             let path = if let Some(v) = self.input.trim().strip_prefix("~/") {
                 policy::home().join(v)

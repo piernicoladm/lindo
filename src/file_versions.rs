@@ -307,20 +307,24 @@ impl FileVersions {
         if self.busy {
             ui.spinner();
             ui.label(&self.status);
+            if self.current.is_none() && ui.button("Interrompi consultazione").clicked() {
+                self.reset();
+                self.status = "Consultazione interrotta.".into();
+            }
             ctx.request_repaint_after(Duration::from_millis(180));
             return;
         }
-        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
-        if dropped.len() == 1 {
-            if let Some(p) = &dropped[0].path {
-                self.reset();
-                self.entry = p.display().to_string();
-            }
-        }
-        if dropped.len() > 1 {
+        if let Some(drop) = ctx.input(|i| {
+            crate::extras::single_drop(&i.raw.dropped_files).map(|r| r.map(Path::to_path_buf))
+        }) {
             self.reset();
-            self.entry.clear();
-            self.status = "Scegli un solo documento.".into();
+            match drop {
+                Ok(path) => self.entry = path.to_string_lossy().into_owned(),
+                Err(reason) => {
+                    self.entry.clear();
+                    self.status = reason.into();
+                }
+            }
         }
         if ui.text_edit_singleline(&mut self.entry).changed() {
             self.reset();
@@ -386,7 +390,9 @@ impl FileVersions {
                     {
                         self.review = Some(i);
                     }
-                    ui.label(format!("{} · {}", r.name, r.date));
+                    let label = format!("{} · {}", r.name, r.date);
+                    ui.add(egui::Label::new(&label).truncate())
+                        .on_hover_text(label);
                 });
                 if r.conflict {
                     ui.small("In conflitto");
@@ -405,6 +411,22 @@ mod tests {
     use super::*;
     use objc2_foundation::NSFileVersionAddingOptions;
     use std::fs;
+    #[test]
+    fn cancelling_inspection_closes_the_mutation_channel() {
+        let (tx, requests) = mpsc::channel();
+        let (_updates, rx) = mpsc::channel();
+        let mut panel = FileVersions {
+            busy: true,
+            session: Some(Session { tx, rx }),
+            entry: "/synthetic/document".into(),
+            ..Default::default()
+        };
+        panel.reset();
+        assert!(requests.recv().is_err());
+        assert!(!panel.busy);
+        assert_eq!(panel.entry, "/synthetic/document");
+    }
+
     #[test]
     fn version_history_rejects_document_replaced_after_open() {
         let temp = tempfile::tempdir().unwrap();

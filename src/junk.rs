@@ -549,10 +549,16 @@ impl Drop for Junk {
     }
 }
 impl Junk {
+    fn cancel_scan(&mut self) {
+        if let Some((stop, _)) = self.scanning.take() {
+            stop.store(true, Ordering::Release);
+            self.status = "Scansione annullata.".into();
+        }
+    }
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> Option<Proposal> {
         ui.heading("Applicazioni e cache di sviluppo");
         let old = self.scope;
-        ui.add_enabled_ui(self.scanning.is_none(), |ui| {
+        ui.add_enabled_ui(self.scanning.is_none() && !self.ollama.busy(), |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (scope, label) in [
                     (Scope::Apps, "App e residui"),
@@ -567,6 +573,7 @@ impl Junk {
             })
         });
         if old != self.scope {
+            self.ollama = ollama::Ollama::default();
             self.result = Inventory::default();
             self.status.clear();
         }
@@ -582,11 +589,14 @@ impl Junk {
             Scope::Installers=>"File PKG, MPKG e DMG direttamente nella cartella Download. Puoi selezionare i file con formato verificato.",
             Scope::Backups=>"Backup locali in MobileSync. Seleziona un backup completato solo se puoi rinunciare a quel punto di ripristino. Le cartelle non verificate si consultano nel Finder.",
         });
-        if let Some((stop, receiver)) = &self.scanning {
+        if self.scanning.is_some() {
             ctx.request_repaint_after(Duration::from_millis(150));
             if ui.button("Annulla scansione").clicked() {
-                stop.store(true, Ordering::Relaxed);
+                self.cancel_scan();
+                ui.label(&self.status);
+                return None;
             }
+            let (_, receiver) = self.scanning.as_ref()?;
             match receiver.try_recv() {
                 Ok(Ok(value)) => {
                     self.status = format!(
@@ -667,7 +677,6 @@ impl Junk {
                     if row.item.is_some() {
                         crate::extras::file_checkbox(ui, &mut row.selected, true, &row.path);
                     }
-                    ui.strong(row.path.file_name().unwrap_or_default().to_string_lossy());
                     if let Some(size) = row.bytes {
                         ui.label(if size < 1024 * 1024 {
                             format!("{} B", size)
@@ -684,8 +693,12 @@ impl Junk {
                             self.status = e.to_string();
                         }
                     }
+                    let name = row.path.file_name().unwrap_or_default().to_string_lossy();
+                    ui.add(egui::Label::new(egui::RichText::new(name).strong()).truncate())
+                        .on_hover_text(row.path.display().to_string());
                 });
-                ui.add(egui::Label::new(&row.reason).truncate());
+                ui.add(egui::Label::new(&row.reason).truncate())
+                    .on_hover_text(&row.reason);
                 ui.add(egui::Label::new(row.path.to_string_lossy()).truncate())
                     .on_hover_text(row.path.display().to_string());
             }
@@ -698,6 +711,19 @@ impl Junk {
 mod tests {
     use super::*;
     use std::{fs, os::unix::fs::symlink};
+
+    #[test]
+    fn cancellation_discards_even_a_queued_inventory() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(Inventory::default())).unwrap();
+        let mut junk = Junk::default();
+        junk.scanning = Some((stop.clone(), rx));
+        junk.cancel_scan();
+        assert!(stop.load(Ordering::Acquire));
+        assert!(junk.scanning.is_none());
+        assert!(tx.send(Ok(Inventory::default())).is_err());
+    }
 
     #[test]
     fn inventories_installers_and_backups_without_removal_candidates() {
