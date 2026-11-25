@@ -397,10 +397,10 @@
       "sha256": "be63eb3166e71af6d3795ee554ae54abaeaec9254cb4bd2810a1c3a87daa0bf8"
     },
     {
-      "bytes": 91129,
+      "bytes": 96826,
       "mode": "0644",
       "path": "src/ui_results.rs",
-      "sha256": "ed5fee67d880cf79a3f3b2ac795420b8e01b1ba8172d295bae25ea388756b433"
+      "sha256": "848a7859a59a5def97e933021d527209e948bb7a39a19f08544b1e18271d02aa"
     },
     {
       "bytes": 26232,

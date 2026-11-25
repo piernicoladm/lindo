@@ -57,7 +57,7 @@ impl Lindo {
                 ui.horizontal_wrapped(|ui| {
                     if mode == Mode::Space {
                         if let Some(h) = home() {
-                            egui::ComboBox::from_id_salt("scope")
+                            let scope = egui::ComboBox::from_id_salt("scope")
                                 .selected_text("Ambito")
                                 .show_ui(ui, |ui| {
                                     for (label, p) in [
@@ -73,12 +73,22 @@ impl Lindo {
                                             )
                                             .clicked()
                                         {
-                                            page.invalidate();
-                                            page.history.clear();
-                                            page.req.roots = vec![p];
+                                            if page.req.roots.as_slice() != [p.as_path()] {
+                                                page.invalidate();
+                                                page.history.clear();
+                                                page.req.roots = vec![p];
+                                            }
+                                            ui.memory_mut(|memory| memory.close_popup());
                                         }
                                     }
                                 });
+                            scope.response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::ComboBox,
+                                    ui.is_enabled(),
+                                    "Ambito",
+                                )
+                            });
                         }
                         if ui
                             .add_enabled(!page.history.is_empty(), egui::Button::new("Indietro"))
@@ -111,11 +121,13 @@ impl Lindo {
                             .selected_text(label(page.req.min_bytes))
                             .show_ui(ui, |ui| {
                                 for &n in options {
-                                    if ui
-                                        .selectable_value(&mut page.req.min_bytes, n, label(n))
-                                        .changed()
-                                    {
+                                    let choice =
+                                        ui.selectable_value(&mut page.req.min_bytes, n, label(n));
+                                    if choice.changed() {
                                         page.invalidate();
+                                    }
+                                    if choice.clicked() {
+                                        ui.memory_mut(|memory| memory.close_popup());
                                     }
                                 }
                             });
@@ -168,16 +180,31 @@ impl Lindo {
             if mode == Mode::Duplicates {
                 ui.horizontal_wrapped(|ui| {
                     ui.small("Ordina gruppi");
-                    egui::ComboBox::from_id_salt("ordine-duplicati")
+                    let order = egui::ComboBox::from_id_salt("ordine-duplicati")
                         .selected_text(if page.sort_by_path {
                             "Primo percorso"
                         } else {
                             "Spazio extra"
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut page.sort_by_path, false, "Spazio extra");
-                            ui.selectable_value(&mut page.sort_by_path, true, "Primo percorso");
+                            for (sort_by_path, label) in
+                                [(false, "Spazio extra"), (true, "Primo percorso")]
+                            {
+                                if ui
+                                    .selectable_value(&mut page.sort_by_path, sort_by_path, label)
+                                    .clicked()
+                                {
+                                    ui.memory_mut(|memory| memory.close_popup());
+                                }
+                            }
                         });
+                    order.response.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::ComboBox,
+                            ui.is_enabled(),
+                            "Ordina gruppi",
+                        )
+                    });
                 });
             }
             if mode != Mode::Space {
@@ -859,7 +886,7 @@ fn duplicate_group(
                                     .clicked()
                                 {
                                     next = row;
-                                    ui.close_menu();
+                                    ui.memory_mut(|memory| memory.close_popup());
                                 }
                             }
                         },
@@ -1516,6 +1543,115 @@ mod layout_tests {
             .any(|s| s.contains("Cartella pronta") && s.contains("500 MB")));
         assert!(app.pages[&Mode::Large].result.is_none());
         assert!(!after.iter().any(|s| s.contains("sample.bin")));
+    }
+
+    #[test]
+    fn accesskit_press_dismisses_scope_threshold_and_order_popups() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        design::configure(&ctx);
+        let mut app = Lindo::new(&ctx);
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap().join("one.bin");
+        std::fs::write(&path, b"one").unwrap();
+        let mut report = Report::default();
+        report.items.push(crate::model::Item {
+            identity: crate::trash::Identity::read(&path).unwrap(),
+            path,
+            bytes: 3,
+            cloud: false,
+            group: Some(1),
+        });
+        app.pages
+            .get_mut(&Mode::Duplicates)
+            .unwrap()
+            .install(Arc::new(Results::prepare(Mode::Duplicates, report)));
+        for (mode, trigger, option, other) in [
+            (Mode::Large, "Dimensione minima: 100 MB", "1 GB", "500 MB"),
+            (Mode::Large, "Dimensione minima: 1 GB", "1 GB", "500 MB"),
+            (Mode::Space, "Ambito", "Utente", "Library"),
+            (Mode::Space, "Ambito", "Utente", "Library"),
+            (
+                Mode::Duplicates,
+                "Ordina gruppi",
+                "Primo percorso",
+                "Spazio extra",
+            ),
+            (
+                Mode::Duplicates,
+                "Ordina gruppi",
+                "Primo percorso",
+                "Spazio extra",
+            ),
+        ] {
+            let draw = |app: &mut Lindo, events| {
+                ctx.run(
+                    egui::RawInput {
+                        events,
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1080., 720.),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| app.section(ui, mode, ctx));
+                    },
+                )
+                .platform_output
+                .accesskit_update
+                .unwrap()
+            };
+            let press = |app: &mut Lindo, label: &str| {
+                let tree = draw(app, vec![]);
+                let target = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, n)| {
+                        n.label() == Some(label)
+                            && n.supports_action(egui::accesskit::Action::Click)
+                    })
+                    .unwrap_or_else(|| panic!("Missing clickable {label}"))
+                    .0;
+                draw(
+                    app,
+                    vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            target,
+                            action: egui::accesskit::Action::Click,
+                            data: None,
+                        },
+                    )],
+                );
+            };
+            let tree = draw(&mut app, vec![]);
+            if mode == Mode::Duplicates
+                && !tree.nodes.iter().any(|(_, n)| {
+                    n.label() == Some(trigger) && n.supports_action(egui::accesskit::Action::Click)
+                })
+            {
+                press(&mut app, "Opzioni");
+                draw(&mut app, vec![]);
+            }
+            press(&mut app, trigger);
+            press(&mut app, option);
+            let next = draw(&mut app, vec![]);
+            assert!(
+                !ctx.memory(|memory| memory.any_popup_open()),
+                "{trigger} left the menu open"
+            );
+            assert!(
+                !next.nodes.iter().any(|(_, n)| n.label() == Some(other)
+                    && n.supports_action(egui::accesskit::Action::Click)),
+                "{trigger} still exposes {other}"
+            );
+            match mode {
+                Mode::Large => assert_eq!(app.pages[&mode].req.min_bytes, 1_000_000_000),
+                Mode::Space => assert_eq!(app.pages[&mode].req.roots, vec![home().unwrap()]),
+                Mode::Duplicates => assert!(app.pages[&mode].sort_by_path),
+                _ => unreachable!(),
+            }
+        }
     }
 
     #[test]
