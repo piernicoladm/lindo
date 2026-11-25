@@ -41,7 +41,7 @@ fn title(mode: Mode) -> &'static str {
 fn hint(mode: Mode) -> &'static str {
     match mode {
         Mode::Space => "Misura le cartelle e approfondisci la mappa in sola lettura.",
-        Mode::Large => "Trova i file che superano la soglia scelta.",
+        Mode::Large => "Trova i file di dimensione pari o superiore alla soglia scelta.",
         Mode::Duplicates => "Confronta copie identiche e scegli quale conservare per ogni gruppo.",
         Mode::Cache => {
             "Analizza le cache HTTP riconosciute. Chiudi i browser prima di procedere al Cestino."

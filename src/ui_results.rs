@@ -16,13 +16,13 @@ impl Lindo {
                 self.mode = None;
             }
         });
-        let compact_scopes = mode == Mode::Duplicates && self.pages[&mode].result.is_some();
-        if !compact_scopes {
-            ui.label(if mode == Mode::Duplicates {
-                "Scegli quale copia conservare."
-            } else {
-                hint(mode)
-            });
+        let has_items = self.pages[&mode]
+            .result
+            .as_ref()
+            .is_some_and(|r| !r.report.items.is_empty());
+        let compact_scopes = mode == Mode::Duplicates && has_items;
+        if !compact_scopes && has_items {
+            ui.label(hint(mode));
             ui.add_space(8.);
         }
         let available = self.available();
@@ -30,6 +30,28 @@ impl Lindo {
         let mut scan = false;
         let mut choose = false;
         let mut append = false;
+        let running = self.active.as_ref().is_some_and(|a| a.mode == mode);
+        if page.result.is_none() {
+            if running {
+                ui.label("Analisi in corso…");
+                return;
+            }
+            ui.horizontal_wrapped(|ui| {
+                if design::primary(ui, "Analizza", available && !page.req.roots.is_empty())
+                    .clicked()
+                {
+                    scan = true;
+                }
+                ui.label(ready_message(&page.req));
+            });
+            ui.add_space(8.);
+        }
+        if page.result.is_some()
+            && !has_items
+            && design::primary(ui, "Analizza di nuovo", available).clicked()
+        {
+            scan = true;
+        }
         let mut scopes = |ui: &mut egui::Ui, page: &mut Page| {
             ui.add_enabled_ui(available, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -75,6 +97,8 @@ impl Lindo {
                             append = ui.button("Aggiungi cartella…").clicked();
                         }
                     }
+                });
+                ui.horizontal_wrapped(|ui| {
                     if matches!(mode, Mode::Large | Mode::Duplicates) {
                         let options: &[u64] = if mode == Mode::Large {
                             &[100_000_000, 500_000_000, 1_000_000_000]
@@ -82,7 +106,8 @@ impl Lindo {
                             &[0, 1_000, 1_000_000, 100_000_000]
                         };
                         let label = |n| if n == 0 { "Tutti".to_owned() } else { size(n) };
-                        egui::ComboBox::from_id_salt("threshold")
+                        ui.small("Dimensione minima");
+                        let threshold = egui::ComboBox::from_id_salt("threshold")
                             .selected_text(label(page.req.min_bytes))
                             .show_ui(ui, |ui| {
                                 for &n in options {
@@ -94,18 +119,26 @@ impl Lindo {
                                     }
                                 }
                             });
+                        threshold.response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::ComboBox,
+                                ui.is_enabled(),
+                                format!("Dimensione minima: {}", label(page.req.min_bytes)),
+                            )
+                        });
                     }
-                    if ui
-                        .add_enabled(!page.req.roots.is_empty(), egui::Button::new("Analizza"))
-                        .clicked()
+                    if has_items
+                        && ui
+                            .add_enabled(
+                                !page.req.roots.is_empty(),
+                                egui::Button::new("Analizza di nuovo"),
+                            )
+                            .clicked()
                     {
                         scan = true;
                     }
                 });
             });
-            if page.req.roots.is_empty() {
-                ui.small("Scegli una cartella per iniziare.");
-            }
             let mut remove = None;
             egui::ScrollArea::vertical()
                 .id_salt(("radici", mode))
@@ -178,7 +211,7 @@ impl Lindo {
                 });
             }
         };
-        if mode != Mode::Duplicates && mode != Mode::Space && page.result.is_some() {
+        if mode != Mode::Duplicates && mode != Mode::Space && has_items {
             ui.horizontal_wrapped(|ui| {
                 let count = page.selected.len();
                 if design::primary(ui, &review_action(mode, count), count > 0 && available)
@@ -203,6 +236,14 @@ impl Lindo {
                 }
             });
             ui.separator();
+        }
+        if mode != Mode::Duplicates
+            && has_items
+            && !page.query.is_empty()
+            && page.query == page.applied
+            && page.count() == 0
+        {
+            clear_empty_filter(ui, page);
         }
         if compact_scopes {
             let settings_id = ui.id().with("duplicate-options");
@@ -286,12 +327,6 @@ impl Lindo {
             return;
         }
         let Some(results) = page.result.clone() else {
-            ui.add_space(18.0);
-            ui.label(if self.active.as_ref().is_some_and(|a| a.mode == mode) {
-                "Analisi in corso…"
-            } else {
-                "Nessun risultato. Avvia un’analisi per esaminare questa sezione."
-            });
             return;
         };
         let r = &results.report;
@@ -341,7 +376,7 @@ impl Lindo {
                 }
             });
         }
-        if r.errors > 0 || r.cancelled {
+        if !r.items.is_empty() && (r.errors > 0 || r.cancelled) {
             ui.colored_label(
                 ui.visuals().warn_fg_color,
                 format!("Copertura parziale · {} errori", r.errors),
@@ -349,6 +384,27 @@ impl Lindo {
         }
         if !compact_scopes {
             report_notes(ui, r);
+        }
+        if r.items.is_empty() {
+            let incomplete = r.cancelled || r.errors > 0 || r.skipped > 0;
+            let message = empty_scan_message(&page.req, incomplete);
+            if incomplete {
+                ui.colored_label(ui.visuals().warn_fg_color, message);
+                if r.errors > 0 || r.cancelled {
+                    ui.small(format!(
+                        "{} errori{}",
+                        number(r.errors),
+                        if r.cancelled {
+                            " · analisi interrotta"
+                        } else {
+                            ""
+                        }
+                    ));
+                }
+            } else {
+                ui.label(message);
+            }
+            return;
         }
         if mode == Mode::Duplicates {
             let panel = ui.available_rect_before_wrap();
@@ -460,13 +516,6 @@ impl Lindo {
             });
         }
         let rows = page.count();
-        if rows == 0 && page.applied == page.query {
-            ui.label(if page.query.is_empty() {
-                "Nessun elemento trovato nell’ambito analizzato."
-            } else {
-                "Nessun elemento corrisponde alla ricerca."
-            });
-        }
         egui::ScrollArea::vertical()
             .id_salt(("risultati", mode))
             .auto_shrink([false, false])
@@ -756,11 +805,9 @@ fn duplicate_group(
 ) -> Option<(u64, Option<PathBuf>)> {
     let count = page.count();
     if count == 0 {
-        ui.label(if page.query.is_empty() {
-            "Nessuna copia identica trovata."
-        } else {
-            "Nessun gruppo corrisponde alla ricerca."
-        });
+        if page.applied == page.query {
+            clear_empty_filter(ui, page);
+        }
         return None;
     }
     // Cursor is a visible row offset. Both sort orders and filter results keep
@@ -1163,6 +1210,65 @@ fn report_notes(ui: &mut egui::Ui, r: &Report) {
     }
 }
 
+fn ready_message(req: &Request) -> String {
+    let count = req.roots.len();
+    if count == 0 {
+        return if matches!(req.mode, Mode::Large | Mode::Space | Mode::Duplicates) {
+            "Scegli una cartella per iniziare."
+        } else {
+            "Nessuna cartella disponibile per questa analisi."
+        }
+        .into();
+    }
+    let roots = if count == 1 {
+        "Cartella pronta".into()
+    } else {
+        format!("{} cartelle pronte", number(count))
+    };
+    let action = match req.mode {
+        Mode::Large => format!("cercare file da {} in su", size(req.min_bytes)),
+        Mode::Duplicates if req.min_bytes > 0 => {
+            format!("cercare copie identiche da {} in su", size(req.min_bytes))
+        }
+        Mode::Duplicates => "cercare copie identiche".into(),
+        Mode::Space => "misurare lo spazio occupato".into(),
+        Mode::Cache => "cercare le cache HTTP dei browser".into(),
+        Mode::Logs => "cercare log modificati da almeno 7 giorni".into(),
+        Mode::Apps => "elencare le applicazioni".into(),
+        Mode::Junk => "esaminare cache e file di supporto".into(),
+    };
+    format!("{roots}. Premi Analizza per {action}.")
+}
+
+fn empty_scan_message(req: &Request, incomplete: bool) -> String {
+    let criterion = match req.mode {
+        Mode::Large => format!("Nessun file da {} in su", size(req.min_bytes)),
+        Mode::Duplicates if req.min_bytes > 0 => {
+            format!("Nessuna copia identica da {} in su", size(req.min_bytes))
+        }
+        Mode::Duplicates => "Nessuna copia identica".into(),
+        Mode::Space => "Nessun elemento da misurare".into(),
+        Mode::Cache => "Nessuna cache HTTP riconosciuta".into(),
+        Mode::Logs => "Nessun log modificato da almeno 7 giorni".into(),
+        Mode::Apps => "Nessuna applicazione".into(),
+        Mode::Junk => "Nessuna cache o file di supporto".into(),
+    };
+    if incomplete {
+        format!("Copertura parziale. {criterion} tra gli elementi esaminati.")
+    } else {
+        format!("Analisi completata. {criterion} nelle cartelle analizzate.")
+    }
+}
+
+fn clear_empty_filter(ui: &mut egui::Ui, page: &mut Page) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Nessun risultato corrisponde al filtro.");
+        if ui.small_button("Cancella filtro").clicked() {
+            page.query.clear();
+        }
+    });
+}
+
 fn review_action(mode: Mode, count: usize) -> String {
     let noun = match (mode, count) {
         (Mode::Apps, _) => "app",
@@ -1222,6 +1328,246 @@ fn action_cell(
 #[cfg(test)]
 mod layout_tests {
     use super::*;
+
+    #[test]
+    fn large_folder_and_threshold_distinguish_ready_empty_and_filtered_results() {
+        const CHILD: &str = "LINDO_SCAN_STATES_FIXTURE";
+        if std::env::var_os(CHILD).is_none() {
+            let home = tempfile::Builder::new()
+                .prefix("lindo-scan-states-")
+                .tempdir()
+                .unwrap();
+            let root = home.path().canonicalize().unwrap();
+            let downloads = root.join("Downloads");
+            std::fs::create_dir_all(downloads.join("first")).unwrap();
+            std::fs::create_dir(downloads.join("second")).unwrap();
+            std::fs::File::create(downloads.join("first/sample.bin"))
+                .unwrap()
+                .set_len(510_000_000)
+                .unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "ui::results::layout_tests::large_folder_and_threshold_distinguish_ready_empty_and_filtered_results", "--nocapture"])
+                .env(CHILD, "1").env("HOME", &root).env("LINDO_FIXTURE_WORKER", &root).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        design::configure(&ctx);
+        let mut app = Lindo::new(&ctx);
+        app.mode = Some(Mode::Large);
+        let draw = |app: &mut Lindo, events| {
+            app.picker.poll();
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(660., 460.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::SidePanel::left("nav")
+                        .exact_width(160.)
+                        .show(ctx, |_| {});
+                    egui::TopBottomPanel::bottom("status")
+                        .exact_height(24.)
+                        .show(ctx, |_| {});
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.add_space(58.);
+                        if app.picker.visible() {
+                            if let Some((mode, path)) = app.picker.draw(ui, ctx) {
+                                app.pages
+                                    .get_mut(&mode)
+                                    .unwrap()
+                                    .choose_root(path, app.append_root);
+                            }
+                        } else {
+                            app.section(ui, Mode::Large, ctx);
+                        }
+                    });
+                },
+            )
+            .platform_output
+            .accesskit_update
+            .unwrap()
+        };
+        let click = |app: &mut Lindo, label: &str| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            let bounds = loop {
+                let tree = draw(app, vec![]);
+                if let Some(bounds) = tree.nodes.iter().find_map(|(_, n)| {
+                    (n.label() == Some(label) || n.value() == Some(label))
+                        .then(|| n.bounds())
+                        .flatten()
+                }) {
+                    break bounds;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "missing {label}: {:?}",
+                    tree.nodes
+                        .iter()
+                        .filter_map(|(_, n)| n.label().or(n.value()))
+                        .collect::<Vec<_>>()
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            assert!(
+                bounds.x0 >= 160. && bounds.x1 <= 660. && bounds.y1 <= 436.,
+                "{label}: {bounds:?}"
+            );
+            let pos = egui::pos2(
+                ((bounds.x0 + bounds.x1) / 2.) as f32,
+                ((bounds.y0 + bounds.y1) / 2.) as f32,
+            );
+            for pressed in [true, false] {
+                draw(
+                    app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+        };
+        let labels = |app: &mut Lindo| {
+            draw(app, vec![])
+                .nodes
+                .into_iter()
+                .filter_map(|(_, n)| n.label().or(n.value()).map(str::to_owned))
+                .collect::<Vec<_>>()
+        };
+        let complete = |app: &mut Lindo| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while app.active.is_some() {
+                app.receive();
+                assert!(std::time::Instant::now() < deadline, "scan did not finish");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        assert!(labels(&mut app)
+            .iter()
+            .any(|s| s == "Scegli una cartella per iniziare."));
+        click(&mut app, "Scegli cartella…");
+        click(&mut app, "first");
+        click(&mut app, "Seleziona questa cartella");
+        click(&mut app, "Dimensione minima: 100 MB");
+        click(&mut app, "1 GB");
+        let ready = labels(&mut app);
+        assert!(ready
+            .iter()
+            .any(|s| s == "Cartella pronta. Premi Analizza per cercare file da 1 GB in su."));
+        assert_eq!(ready.iter().filter(|s| s.as_str() == "Analizza").count(), 1);
+        assert!(!ready
+            .iter()
+            .any(|s| s.contains("Nessun risultato") || s.contains("Analisi completata")));
+        click(&mut app, "Analizza");
+        assert!(labels(&mut app).iter().any(|s| s == "Analisi in corso…"));
+        complete(&mut app);
+        assert!(labels(&mut app).iter().any(
+            |s| s == "Analisi completata. Nessun file da 1 GB in su nelle cartelle analizzate."
+        ));
+        click(&mut app, "Impostazioni dell’analisi");
+        click(&mut app, "Dimensione minima: 1 GB");
+        click(&mut app, "500 MB");
+        assert!(app.pages[&Mode::Large].result.is_none());
+        click(&mut app, "Analizza");
+        complete(&mut app);
+        assert_eq!(
+            app.pages[&Mode::Large]
+                .result
+                .as_ref()
+                .unwrap()
+                .report
+                .items
+                .len(),
+            1
+        );
+        app.pages.get_mut(&Mode::Large).unwrap().query = "missing-name".into();
+        app.refresh_filter(Mode::Large, &ctx);
+        let timeout = std::time::Instant::now() + Duration::from_secs(3);
+        while app.filtering {
+            app.receive();
+            assert!(std::time::Instant::now() < timeout);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(labels(&mut app)
+            .iter()
+            .any(|s| s == "Nessun risultato corrisponde al filtro."));
+        click(&mut app, "Cancella filtro");
+        assert_eq!(app.pages[&Mode::Large].count(), 1);
+        click(&mut app, "Scegli cartella…");
+        click(&mut app, "second");
+        click(&mut app, "Seleziona questa cartella");
+        let after = labels(&mut app);
+        assert!(after
+            .iter()
+            .any(|s| s.contains("Cartella pronta") && s.contains("500 MB")));
+        assert!(app.pages[&Mode::Large].result.is_none());
+        assert!(!after.iter().any(|s| s.contains("sample.bin")));
+    }
+
+    #[test]
+    fn complete_and_partial_empty_scans_name_the_criterion_in_every_mode() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        design::configure(&ctx);
+        let mut app = Lindo::new(&ctx);
+        for mode in MODES {
+            let page = app.pages.get_mut(&mode).unwrap();
+            page.req.roots = vec![
+                PathBuf::from("/synthetic/one"),
+                PathBuf::from("/synthetic/two"),
+            ];
+            assert!(ready_message(&page.req).starts_with("2 cartelle pronte."));
+            for (skipped, errors, cancelled) in
+                [(0, 0, false), (1, 0, false), (0, 1, false), (0, 0, true)]
+            {
+                let page = app.pages.get_mut(&mode).unwrap();
+                page.install(Arc::new(Results::prepare(
+                    mode,
+                    Report {
+                        skipped,
+                        errors,
+                        cancelled,
+                        ..Default::default()
+                    },
+                )));
+                let partial = skipped > 0 || errors > 0 || cancelled;
+                let expected = empty_scan_message(&page.req, partial);
+                let output = ctx.run(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.section(ui, mode, ctx));
+                });
+                let tree = output.platform_output.accesskit_update.unwrap();
+                assert!(
+                    tree.nodes
+                        .iter()
+                        .any(|(_, n)| n.label() == Some(&expected) || n.value() == Some(&expected)),
+                    "{mode:?}: {expected}"
+                );
+                assert!(expected.contains(if partial {
+                    "Copertura parziale"
+                } else {
+                    "Analisi completata"
+                }));
+                assert!(!tree
+                    .nodes
+                    .iter()
+                    .any(|(_, n)| n.label() == Some("Seleziona copie extra")));
+            }
+        }
+    }
 
     #[test]
     fn cleanup_selection_reviews_visible_and_hidden_paths_before_any_move() {

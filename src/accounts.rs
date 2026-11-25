@@ -514,11 +514,11 @@ impl Accounts {
         }
     }
     fn review_button(&mut self, ui: &mut egui::Ui) {
+        if self.selected.is_empty() {
+            return;
+        }
         if ui
-            .add_enabled(
-                !self.selected.is_empty(),
-                egui::Button::new(format!("Rivedi {} selezionati", self.selected.len())),
-            )
+            .button(format!("Rivedi {} selezionati", self.selected.len()))
             .clicked()
         {
             let mut indices: Vec<_> = self.selected.iter().copied().collect();

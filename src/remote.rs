@@ -704,23 +704,19 @@ impl Remote {
         if self.job.is_some() {
             return;
         }
-        if ui
-            .add_enabled(
-                !self.selected.is_empty(),
-                egui::Button::new(format!("Sposta in revisione ({})", self.selected.len())),
-            )
-            .clicked()
-        {
-            self.review = Some(Review::Move(review_name()));
-        }
-        if ui
-            .add_enabled(
-                !self.selected.is_empty(),
-                egui::Button::new(format!("Rimuovi dal cloud ({})", self.selected.len())),
-            )
-            .clicked()
-        {
-            self.review = Some(Review::Trash);
+        if !self.selected.is_empty() {
+            if ui
+                .button(format!("Sposta in revisione ({})", self.selected.len()))
+                .clicked()
+            {
+                self.review = Some(Review::Move(review_name()));
+            }
+            if ui
+                .button(format!("Rimuovi dal cloud ({})", self.selected.len()))
+                .clicked()
+            {
+                self.review = Some(Review::Trash);
+            }
         }
         let mut enter = None;
         let mut names = HashSet::new();
