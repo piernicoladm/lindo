@@ -99,14 +99,6 @@ impl SystemJunk {
         if let Some(list) = &self.review {
             ui.strong(format!("Conferma {} file esatti", list.len()));
             ui.label("Lindo verifica nuovamente attribuzione, identità, app in esecuzione e file aperti visibili. Per i file di proprietà del sistema, Finder può richiedere autorizzazione. Puoi rifiutarla.");
-            egui::ScrollArea::vertical()
-                .id_salt("system_junk_review")
-                .max_height(230.)
-                .show(ui, |ui| {
-                    for item in list {
-                        ui.label(item.path.display().to_string());
-                    }
-                });
             if ui.button("Annulla").clicked() {
                 self.review = None;
                 return;
@@ -130,6 +122,16 @@ impl SystemJunk {
                     Ok(Outcome::Moved(receipts))
                 });
             }
+            if let Some(list) = &self.review {
+                egui::ScrollArea::vertical()
+                    .id_salt("system_junk_review")
+                    .max_height(230.)
+                    .show(ui, |ui| {
+                        for item in list {
+                            ui.label(item.path.display().to_string());
+                        }
+                    });
+            }
             return;
         }
         if ui.button("Analizza cache e log condivisi").clicked() {
@@ -141,10 +143,30 @@ impl SystemJunk {
             });
         }
         ui.label(&self.status);
-        for line in &self.receipt {
-            ui.label(line);
+        if !self.receipt.is_empty() {
+            egui::ScrollArea::vertical()
+                .id_salt("system_junk_receipts")
+                .show(ui, |ui| {
+                    for line in &self.receipt {
+                        ui.label(line);
+                    }
+                });
         }
         if !self.inventory.items.is_empty() {
+            if ui
+                .add_enabled(
+                    !self.chosen.is_empty(),
+                    egui::Button::new(format!("Rivedi {} file", self.chosen.len())),
+                )
+                .clicked()
+            {
+                self.review = Some(
+                    self.chosen
+                        .iter()
+                        .map(|i| self.inventory.items[*i].clone())
+                        .collect(),
+                );
+            }
             egui::ScrollArea::vertical()
                 .id_salt("system_junk_candidates")
                 .max_height(230.)
@@ -176,20 +198,6 @@ impl SystemJunk {
                         }
                     }
                 });
-            if ui
-                .add_enabled(
-                    !self.chosen.is_empty(),
-                    egui::Button::new(format!("Rivedi {} file", self.chosen.len())),
-                )
-                .clicked()
-            {
-                self.review = Some(
-                    self.chosen
-                        .iter()
-                        .map(|i| self.inventory.items[*i].clone())
-                        .collect(),
-                );
-            }
         }
     }
 }

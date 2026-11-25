@@ -359,7 +359,6 @@ impl Clutter {
         ui.horizontal_wrapped(|ui| {
             ui.label(self.root.display().to_string());
             if ui.button("Scegli cartella").clicked() {
-                self.clear();
                 self.picker.open(Mode::Large, ctx);
             }
         });
@@ -458,6 +457,9 @@ impl Clutter {
                 self.visible.len(),
                 self.selected.len()
             ));
+            if !self.selected.is_empty() && ui.button("Deseleziona tutto").clicked() {
+                self.selected.clear();
+            }
             review = ui
                 .add_enabled(
                     !self.selected.is_empty(),

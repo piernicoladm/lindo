@@ -521,6 +521,7 @@ impl Review {
 
 #[derive(Default)]
 struct TrashSummary {
+    requested: usize,
     moved: usize,
     failures: Vec<String>,
     stale: HashSet<Mode>,
@@ -625,6 +626,7 @@ struct Lindo {
     cleaning: bool,
     revealing: bool,
     status: String,
+    scan_status_mode: Option<Mode>,
     failures: Vec<String>,
     disk: Option<(u64, u64)>,
     volume_label: String,
@@ -726,6 +728,7 @@ impl Lindo {
             cleaning: false,
             revealing: false,
             status: String::new(),
+            scan_status_mode: None,
             failures: vec![],
             disk: None,
             volume_label: "Disco dell’utente".into(),
@@ -744,6 +747,7 @@ impl Lindo {
                         self.active = None;
                         self.assessment.record_core(mode, &result.report);
                         self.status = overview::scan_status(mode, &result.report);
+                        self.scan_status_mode = Some(mode);
                         self.pages.get_mut(&mode).unwrap().install(result);
                     }
                 }
@@ -767,7 +771,9 @@ impl Lindo {
                 }
                 Event::Trash(origin, mut summary) => {
                     self.cleaning = false;
-                    if summary.moved > 0 {
+                    self.scan_status_mode = None;
+                    if summary.moved > 0 || matches!(self.extra, Some(Extra::Junk | Extra::Clutter))
+                    {
                         self.clutter = Default::default();
                         self.junk = Default::default();
                     }
@@ -779,8 +785,8 @@ impl Lindo {
                         );
                     } else {
                         self.status = format!(
-                            "Spostati nel Cestino: {}. Ripeti l’analisi degli ambiti interessati.",
-                            summary.moved
+                            "Spostati nel Cestino {} di {}. Ripeti l’analisi per aggiornare i risultati.",
+                            summary.moved, summary.requested
                         );
                     }
                     self.failures = summary.failures;
@@ -801,11 +807,24 @@ impl Lindo {
                 Event::Reveal(result) => {
                     self.revealing = false;
                     if let Err(e) = result {
+                        self.scan_status_mode = None;
                         self.status = e;
                     }
                 }
             }
         }
+    }
+    fn status_visible(&self) -> bool {
+        !self.status.is_empty()
+            && self.scan_status_mode.is_none_or(|mode| {
+                !self.searching
+                    && self.extra.is_none()
+                    && self.review.is_none()
+                    && !self.picker.visible()
+                    && self.pages[&mode].result.is_some()
+                    && (self.mode == Some(mode)
+                        || (self.mode.is_none() && self.destination == design::Destination::Home))
+            })
     }
     fn available(&self) -> bool {
         self.active.is_none() && !self.cleaning && !self.picker.visible() && self.workers < 2
@@ -832,6 +851,7 @@ impl Lindo {
         });
         self.workers += 1;
         self.status.clear();
+        self.scan_status_mode = None;
         let sender = self.tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
@@ -853,6 +873,7 @@ impl Lindo {
         self.quick.clear();
         if let Some(activity) = self.active.take() {
             activity.stop.store(true, Ordering::Release);
+            self.scan_status_mode = None;
             self.status =
                 "Analisi interrotta. I risultati incompleti sono stati scartati.".to_owned();
         }
@@ -883,6 +904,9 @@ impl Lindo {
     }
     fn trash(&mut self, review: Review, ctx: &egui::Context) {
         self.cleaning = true;
+        self.status.clear();
+        self.scan_status_mode = None;
+        self.failures.clear();
         self.confirm = false;
         // Scope controls are disabled until completion. The worker checks only
         // these few roots, without walking any indexed rows on the UI thread.
@@ -895,7 +919,10 @@ impl Lindo {
         let sender = self.tx.clone();
         let repaint = ctx.clone();
         std::thread::spawn(move || {
-            let mut summary = TrashSummary::default();
+            let mut summary = TrashSummary {
+                requested: review.moves.len(),
+                ..Default::default()
+            };
             let items = &review.data.report.items;
             for &i in &review.moves {
                 let item = &items[i];
@@ -1123,11 +1150,12 @@ impl eframe::App for Lindo {
             });
         if (self.active.is_some() && !scan_page)
             || self.cleaning
-            || !self.status.is_empty()
+            || self.status_visible()
             || !self.failures.is_empty()
         {
             egui::TopBottomPanel::bottom("attivita").show(ctx, |ui| {
                 let mut stop = false;
+                let mut show = None;
                 if let Some(a) = self.active.as_ref().filter(|_| !scan_page) {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(format!(
@@ -1159,12 +1187,14 @@ impl eframe::App for Lindo {
                             }
                         }
                         if self.mode != Some(a.mode) && ui.button("Mostra").clicked() {
-                            self.extra = None;
-                            self.mode = Some(a.mode);
+                            show = Some(a.mode);
                         }
                         stop = ui.button("Interrompi").clicked();
                     });
                     ctx.request_repaint_after(Duration::from_millis(150));
+                }
+                if let Some(mode) = show {
+                    self.open_mode(mode);
                 }
                 if stop {
                     self.cancel();
@@ -1174,7 +1204,7 @@ impl eframe::App for Lindo {
                         ui.label("Verifica e spostamento nel Cestino…");
                     });
                 }
-                if !self.status.is_empty() {
+                if self.status_visible() {
                     ui.label(&self.status);
                 }
                 if !self.failures.is_empty() {
@@ -1215,7 +1245,7 @@ impl eframe::App for Lindo {
                 ui.add_space(3.);
                 let reviewing = self.review.is_some();
                 ui.scope(|ui| {
-                    if reviewing {
+                    if reviewing || self.cleaning {
                         ui.disable();
                     }
                     if self.picker.visible() {
@@ -1320,6 +1350,7 @@ impl eframe::App for Lindo {
                             }
                         };
                         if let Some(request) = proposal {
+                            self.scan_status_mode = None;
                             if self.available() {
                                 self.confirm = false;
                                 self.review = Review::from_proposal(request);
@@ -1593,6 +1624,27 @@ mod tests {
             &fresh
         ));
         assert_eq!(app.workers, 0);
+    }
+
+    #[test]
+    fn scan_receipt_is_visible_only_in_its_scope_or_on_the_overview() {
+        let mut app = Lindo::new(&egui::Context::default());
+        app.pages.get_mut(&Mode::Logs).unwrap().install(rows());
+        app.status = "Analisi conclusa · Log".into();
+        app.scan_status_mode = Some(Mode::Logs);
+        app.mode = Some(Mode::Large);
+        assert!(!app.status_visible());
+        app.mode = Some(Mode::Logs);
+        assert!(app.status_visible());
+        app.searching = true;
+        assert!(!app.status_visible());
+        app.open_mode(Mode::Logs);
+        assert!(!app.searching && app.status_visible());
+        app.pages.get_mut(&Mode::Logs).unwrap().invalidate();
+        assert!(!app.status_visible());
+        app.scan_status_mode = None;
+        app.status = "Spostati nel Cestino 1 di 2.".into();
+        assert!(app.status_visible());
     }
 
     #[test]

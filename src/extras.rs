@@ -19,3 +19,33 @@ pub(crate) fn file_checkbox(
     });
     response
 }
+
+pub(crate) fn single_drop(
+    files: &[eframe::egui::DroppedFile],
+) -> Option<Result<&std::path::Path, &'static str>> {
+    match files {
+        [] => None,
+        [file] => Some(file.path.as_deref().ok_or("Scegli un elemento locale.")),
+        _ => Some(Err("Trascina un solo elemento alla volta.")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ambiguous_drops_never_choose_a_target() {
+        let file = eframe::egui::DroppedFile {
+            path: Some("/synthetic/Demo.app".into()),
+            ..Default::default()
+        };
+        assert_eq!(single_drop(&[]), None);
+        assert_eq!(
+            single_drop(std::slice::from_ref(&file)),
+            Some(Ok(file.path.as_deref().unwrap()))
+        );
+        assert!(single_drop(&[file.clone(), file]).unwrap().is_err());
+        assert!(single_drop(&[Default::default()]).unwrap().is_err());
+    }
+}

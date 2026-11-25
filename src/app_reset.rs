@@ -712,9 +712,15 @@ impl AppReset {
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     ui.spinner();
+                    ui.label(if work.mutation {
+                        "Aggiornamento delle preferenze in corso…"
+                    } else {
+                        "Verifica in corso…"
+                    });
                     if !work.mutation && ui.button("Interrompi verifica").clicked() {
                         work.stop.store(true, Ordering::Release);
                         self.work.take();
+                        self.notice = "Verifica interrotta.".into();
                     }
                     ctx.request_repaint_after(Duration::from_millis(160));
                     return;
@@ -746,13 +752,20 @@ impl AppReset {
             ui.label("Documenti, cache e bundle dell’app restano nelle rispettive cartelle.");
             let mut go = false;
             let mut back = false;
-            ui.horizontal(|ui| {
-                go = ui.button("Conferma").clicked();
+            ui.horizontal_wrapped(|ui| {
+                go = ui
+                    .button(match a {
+                        Action::Reset => "Conferma reset delle preferenze",
+                        Action::Restore(..) => "Conferma ripristino delle preferenze",
+                    })
+                    .clicked();
                 back = ui.button("Indietro").clicked();
             });
             if go {
                 let review = p.clone();
                 let action = a.clone();
+                self.preview = None;
+                self.action = None;
                 self.submit(ctx, true, move |stop| {
                     apply(&review, &action, stop).map(Reply::Done)
                 });
@@ -763,10 +776,18 @@ impl AppReset {
             return;
         }
         ui.label("Scegli il percorso o trascina un’app di terzi installata direttamente in Applicazioni. Chiudi l’app prima della verifica.");
-        let drop = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
-        if let Some(path) = drop {
-            self.input = path.to_string_lossy().into_owned();
+        if let Some(drop) = ctx.input(|i| {
+            crate::extras::single_drop(&i.raw.dropped_files).map(|r| r.map(Path::to_path_buf))
+        }) {
             self.preview = None;
+            self.notice.clear();
+            match drop {
+                Ok(path) => self.input = path.to_string_lossy().into_owned(),
+                Err(reason) => {
+                    self.input.clear();
+                    self.notice = reason.into();
+                }
+            }
         }
         if ui.text_edit_singleline(&mut self.input).changed() {
             self.preview = None;
@@ -781,7 +802,13 @@ impl AppReset {
         {
             self.preview = None;
         }
-        if ui.button("Verifica app e preferenze").clicked() {
+        if ui
+            .add_enabled(
+                !self.input.trim().is_empty(),
+                egui::Button::new("Verifica app e preferenze"),
+            )
+            .clicked()
+        {
             self.preview = None;
             let path = if let Some(rel) = self.input.trim().strip_prefix("~/") {
                 policy::home().join(rel)

@@ -39,13 +39,20 @@ function run(argv) {
     const box = boxes[0], account = box.account();
     if (!account || !account.id()) throw Error("Seleziona una casella di un singolo account.");
     const accountID = String(account.id()), boxName = String(box.name());
+    function keyFor(mailbox) {
+        const key = Automation.getDisplayString(mailbox);
+        if (typeof key !== "string" || key.length > 4096 || !/mailbox/i.test(key) || !/Application\(/.test(key))
+            throw Error("Identità della casella non verificabile.");
+        return key;
+    }
+    const boxKey = keyFor(box);
     function request() {
         ObjC.import("Foundation");
         const raw = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
         return JSON.parse(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(raw,$.NSUTF8StringEncoding)));
     }
     function sameBox(input) {
-        if (input.accountID !== accountID || input.boxName !== boxName) throw Error("La casella selezionata è cambiata.");
+        if (input.accountID !== accountID || input.boxName !== boxName || input.boxKey !== boxKey) throw Error("La casella selezionata è cambiata.");
     }
     if (argv[0] === "scan" || argv[0] === "page") {
         const total = box.messages.length, rows = [];
@@ -75,7 +82,7 @@ function run(argv) {
                 rows.push({id,mid,subject:subject.slice(0,240),local,promotion,unsubscribe});
             } catch(e) { ++skipped; }
         }
-        return JSON.stringify({accountID,boxName,total,offset,skipped,rows});
+        return JSON.stringify({accountID,boxName,boxKey,total,offset,skipped,rows});
     }
     if (argv[0] !== "move") throw Error("Azione sconosciuta.");
     const input=request(); sameBox(input);
@@ -87,7 +94,7 @@ function run(argv) {
     if (destinations.length === 0) {
         try { if (String(top.account().id()) === accountID) destinations.push(top); } catch(e) {}
     }
-    if (destinations.length !== 1 || String(destinations[0].name()) === boxName)
+    if (destinations.length !== 1 || keyFor(destinations[0]) === boxKey)
         throw Error("Cestino separato di questo account non identificabile.");
     const targets = [];
     for (const row of input.rows) {
@@ -101,7 +108,7 @@ function run(argv) {
         try {
             const row=input.rows[i], dest=destinations[0];
             const selected=app.messageViewers()[0].selectedMailboxes();
-            if (selected.length!==1 || String(selected[0].account().id())!==accountID || String(selected[0].name())!==boxName)
+            if (selected.length!==1 || String(selected[0].account().id())!==accountID || keyFor(selected[0])!==boxKey)
                 throw Error("La casella selezionata è cambiata.");
             const before=box.messages.whose({id:row.id})();
             if (before.length!==1 || String(before[0].messageId())!==row.mid)
@@ -175,6 +182,7 @@ struct Message {
     unsubscribe: Option<url::Url>,
 }
 struct Mailbox {
+    key: String,
     account: String,
     name: String,
     rows: Vec<Message>,
@@ -212,6 +220,7 @@ fn parse_mail(value: Value) -> Result<Mailbox, String> {
         return Err(invalid());
     }
     Ok(Mailbox {
+        key: string(&value, "boxKey")?,
         account: string(&value, "accountID")?,
         name: string(&value, "boxName")?,
         total,
@@ -474,8 +483,16 @@ impl Accounts {
             }
             Err(mpsc::TryRecvError::Empty) => {
                 ctx.request_repaint_after(Duration::from_millis(160));
-                ui.horizontal(|ui| {
+                if !self.notice.is_empty() {
+                    ui.label(&self.notice);
+                }
+                ui.horizontal_wrapped(|ui| {
                     ui.spinner();
+                    ui.label(if job.mutation {
+                        "Operazione in corso…"
+                    } else {
+                        "Consultazione in corso…"
+                    });
                     if !job.mutation && ui.button("Interrompi").clicked() {
                         job.stop.store(true, Ordering::Release);
                     }
@@ -565,10 +582,9 @@ impl Accounts {
                 })
                 .collect();
             self.mail_refresh = Some(
-                serde_json::json!({"accountID":mail.account,"boxName":mail.name,"offset":mail.offset}),
+                serde_json::json!({"accountID":mail.account,"boxName":mail.name,"boxKey":mail.key,"offset":mail.offset}),
             );
-            let payload =
-                serde_json::json!({"accountID":mail.account,"boxName":mail.name,"rows":rows});
+            let payload = serde_json::json!({"accountID":mail.account,"boxName":mail.name,"boxKey":mail.key,"rows":rows});
             self.selected.clear();
             self.work(ctx, true, move |stop| {
                 let reply = automation(MAIL_SCRIPT, "move", Some(json_input(&payload)?), stop)
@@ -701,7 +717,7 @@ impl Accounts {
                         }
                     });
                     if let Some(offset) = requested {
-                        let payload = serde_json::json!({"accountID":mail.account,"boxName":mail.name,"offset":offset});
+                        let payload = serde_json::json!({"accountID":mail.account,"boxName":mail.name,"boxKey":mail.key,"offset":offset});
                         self.reset();
                         self.work(ctx, false, move |stop| {
                             parse_mail(automation(
@@ -996,7 +1012,12 @@ function fixtureApp() {
         let script = format!(
             "{}\n{}",
             MAIL_FIXTURE,
-            MAIL_SCRIPT.replace("Application(\"com.apple.mail\")", "fixtureApp()")
+            MAIL_SCRIPT
+                .replace("Application(\"com.apple.mail\")", "fixtureApp()")
+                .replace(
+                    "Automation.getDisplayString(mailbox)",
+                    r#"`Application("mail").mailboxes.byName("${mailbox.name()}")`"#
+                )
         );
         let stop = AtomicBool::new(false);
         let inbox = parse_mail(automation(&script, "scan", None, &stop).unwrap()).unwrap();
@@ -1005,7 +1026,7 @@ function fixtureApp() {
         assert_eq!(m.local, 1);
         assert!(m.promotion);
         assert!(m.unsubscribe.is_some());
-        let payload = |mid| json!({"accountID":"fixture-account","boxName":"Fixture","rows":[{"id":3,"mid":mid}]});
+        let payload = |mid| json!({"accountID":"fixture-account","boxName":"Fixture","boxKey":inbox.key,"rows":[{"id":3,"mid":mid}]});
         let good = automation(
             &script,
             "move",
@@ -1015,6 +1036,17 @@ function fixtureApp() {
         .unwrap();
         assert_eq!(good["moved"], 1);
         assert_eq!(good["verified"], 1);
+        let mut other_mailbox = payload("fixture-id");
+        other_mailbox["boxKey"] =
+            json!(r#"Application("mail").mailboxes.byName("Archive").mailboxes.byName("Fixture")"#);
+        assert!(automation(
+            &script,
+            "move",
+            Some(json_input(&other_mailbox).unwrap()),
+            &stop
+        )
+        .is_err());
+
         assert!(automation(
             &script,
             "move",
@@ -1038,13 +1070,18 @@ function fixtureApp(){
 }"#;
         let script = format!(
             "{fixture}\n{}",
-            MAIL_SCRIPT.replace("Application(\"com.apple.mail\")", "fixtureApp()")
+            MAIL_SCRIPT
+                .replace("Application(\"com.apple.mail\")", "fixtureApp()")
+                .replace(
+                    "Automation.getDisplayString(mailbox)",
+                    r#"`Application("mail").mailboxes.byName("${mailbox.name()}")`"#
+                )
         );
         let stop = AtomicBool::new(false);
         let first = parse_mail(automation(&script, "scan", None, &stop).unwrap()).unwrap();
         assert_eq!((first.total, first.offset, first.rows.len()), (220, 0, 0));
         let page = |offset, box_name| {
-            let payload = json!({"accountID":"fixture","boxName":box_name,"offset":offset});
+            let payload = json!({"accountID":"fixture","boxName":box_name,"boxKey":first.key,"offset":offset});
             parse_mail(automation(
                 &script,
                 "page",
@@ -1074,7 +1111,7 @@ function fixtureApp(){
     const CHROME_FIXTURE: &str = r#"
 function fixtureApp(){
     const t = (id)=>({id:()=>id,url:()=>"https://fixture.invalid/",title:()=>"Fixture",exists:()=>true,
-        close:()=>{if(id!=="extra")throw Error("Keeper selected");}});
+        close:()=>{if(id!=="extra")throw Error("Keeper selected"); tabs.splice(tabs.findIndex(tab=>tab.id()===id),1);}});
     const tabs=[t("keep"),t("extra")];
     tabs.byId=(id)=>tabs.find(v=>v.id()===id)||{exists:()=>false};
     const win={id:()=>"w",mode:()=>"normal",exists:()=>true,tabs};
@@ -1099,6 +1136,16 @@ function fixtureApp(){
                 ["closed"],
             1
         );
+        let blocked = script.replace("tabs.splice(tabs.findIndex(tab=>tab.id()===id),1);", "");
+        let result = automation(
+            &blocked,
+            "close",
+            Some(json_input(&payload).unwrap()),
+            &stop,
+        )
+        .unwrap();
+        assert_eq!(result["closed"], 0);
+        assert!(result["error"].as_str().unwrap().contains("non confermata"));
         payload[0]["url"] = json!("https://changed.invalid/");
         assert!(automation(&script, "close", Some(json_input(&payload).unwrap()), &stop).is_err());
     }

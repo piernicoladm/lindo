@@ -338,6 +338,60 @@ fn scan_tree(
 mod tests {
     use super::*;
     #[test]
+    fn panel_retains_findings_until_their_own_removal_is_confirmed() {
+        use super::super::{Action, Job, Mutation, Report, SystemTools};
+        use eframe::egui;
+        use std::sync::{mpsc, Arc};
+
+        let base = std::env::temp_dir().canonicalize().unwrap();
+        let first = tempfile::NamedTempFile::new_in(&base).unwrap();
+        let second = tempfile::NamedTempFile::new_in(&base).unwrap();
+        let a = Finding::capture(first.path(), first.as_file()).unwrap();
+        let b = Finding::capture(second.path(), second.as_file()).unwrap();
+        let mut panel = SystemTools::default();
+        let ctx = egui::Context::default();
+        let finish =
+            |panel: &mut SystemTools, action: Action, findings: Result<Vec<Finding>, String>| {
+                let (tx, rx) = mpsc::sync_channel(1);
+                panel.job = Some(Job {
+                    action,
+                    cancel: Arc::new(AtomicBool::new(false)),
+                    rx,
+                });
+                tx.send(findings.map(|findings| Report {
+                    opened: false,
+                    text: String::new(),
+                    providers: vec![],
+                    snapshots: vec![],
+                    packages: vec![],
+                    findings,
+                }))
+                .unwrap();
+                let _ = ctx.run(Default::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| panel.show(ui, ctx));
+                });
+            };
+        finish(
+            &mut panel,
+            Action::Scan(first.path().into()),
+            Ok(vec![a.clone(), b.clone()]),
+        );
+        finish(&mut panel, Action::Recheck(a.clone()), Ok(vec![]));
+        finish(
+            &mut panel,
+            Action::Maintenance(Mutation::Detected(a.clone())),
+            Err("fixture".into()),
+        );
+        assert_eq!(panel.scan_findings, [a.clone(), b.clone()]);
+        finish(
+            &mut panel,
+            Action::Maintenance(Mutation::Detected(a)),
+            Ok(vec![]),
+        );
+        assert_eq!(panel.scan_findings, [b]);
+    }
+
+    #[test]
     fn folder_uses_validated_handles_and_excludes_private_paths() {
         if let Some(home) = std::env::var_os("LINDO_SYSTEM_SCAN_FIXTURE") {
             let root = PathBuf::from(home).join("sample");

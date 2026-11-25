@@ -419,6 +419,16 @@ impl Monitor {
         }
         s.latest.into_iter().collect()
     }
+    pub(super) fn resolve(&mut self, finding: &security_scan::Finding) {
+        if let Some(session) = &self.session {
+            session
+                .state
+                .lock()
+                .unwrap()
+                .latest
+                .retain(|item| item != finding);
+        }
+    }
     pub(super) fn alert(&mut self, ctx: &egui::Context) {
         let Some(session) = &self.session else {
             return;

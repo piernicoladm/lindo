@@ -631,6 +631,11 @@ impl LegacyJunk {
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     ui.spinner();
+                    ui.label(if job.mutation {
+                        "Spostamento dei file confermati nel Cestino…"
+                    } else {
+                        "Analisi della cartella in corso…"
+                    });
                     if !job.mutation && ui.button("Interrompi").clicked() {
                         self.reset();
                         self.notice = "Analisi interrotta.".into();
@@ -652,7 +657,7 @@ impl LegacyJunk {
             ui.label("Sposta i plist selezionati nel Cestino. Le impostazioni o il job launchd possono servire dopo una reinstallazione.");
             let mut go = false;
             let mut back = false;
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 go = ui.button("Conferma spostamento nel Cestino").clicked();
                 back = ui.button("Indietro").clicked();
             });
@@ -661,7 +666,8 @@ impl LegacyJunk {
                 .show_rows(ui, 45.0, indices.len(), |ui, range| {
                     for n in range {
                         let e = &report.rows[indices[n]];
-                        ui.label(e.path.display().to_string());
+                        ui.add(egui::Label::new(e.path.to_string_lossy()).truncate())
+                            .on_hover_text(e.path.display().to_string());
                         ui.add(egui::Label::new(&e.reason).truncate())
                             .on_hover_text(&e.reason);
                     }

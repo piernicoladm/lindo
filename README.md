@@ -2,7 +2,7 @@
 
 Lindo mostra quali file e cartelle occupano più spazio sul Mac e trova i duplicati esatti confrontando i file byte per byte. La scansione avviene sul Mac, nelle cartelle che scegli. Per ogni gruppo di duplicati puoi confrontare i percorsi, scegliere la copia da conservare e rivedere le altre prima di spostarle nel Cestino.
 
-Lindo 0.9.3 richiede **macOS 26 o successivo su Apple Silicon**. Il codice è scritto in Rust e distribuito con [licenza MIT](LICENSE).
+Lindo 0.9.4 richiede **macOS 26 o successivo su Apple Silicon**. Il codice è scritto in Rust e distribuito con [licenza MIT](LICENSE).
 
 ## Avvio rapido dal sorgente
 
@@ -22,7 +22,8 @@ Lo script apre la copia compilata in `~/Library/Developer/Lindo/staging/` e stam
 
 1. Apri **Mappa dello spazio** e scegli una cartella. Nella mappa proporzionale, i riquadri più grandi indicano gli elementi che occupano più spazio. Fai clic su una cartella per esplorarla.
 2. Per confrontare copie anche in cartelle diverse, apri **Duplicati** e seleziona le cartelle da esaminare. Puoi interrompere la scansione mentre è in corso.
-3. Apri un gruppo di risultati e scegli la copia da conservare. Controlla i percorsi delle copie selezionate prima di confermare lo spostamento nel Cestino.
+3. Apri un gruppo di risultati e scegli la copia da conservare. Controlla i percorsi delle copie selezionate e quella che rimarrà sul Mac.
+4. In **File grandi**, seleziona le righe dei file da rivedere. Con due file compare **Rivedi 2 file per il Cestino**. Nella revisione puoi scegliere **Indietro** per cambiare la selezione oppure **Sposta nel Cestino** per confermare.
 
 ## Funzioni
 

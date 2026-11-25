@@ -131,7 +131,7 @@ impl Lindo {
                 page.invalidate();
             }
         };
-        let mut options = |ui: &mut egui::Ui, page: &mut Page| {
+        let options = |ui: &mut egui::Ui, page: &mut Page| {
             if mode == Mode::Duplicates {
                 ui.horizontal_wrapped(|ui| {
                     ui.small("Ordina gruppi");
@@ -149,10 +149,11 @@ impl Lindo {
             }
             if mode != Mode::Space {
                 ui.horizontal_wrapped(|ui| {
+                    ui.small("Selezione");
                     if mode != Mode::Apps
                         && ui
                             .add_enabled(
-                                page.query == page.applied && page.count() > 0,
+                                available && page.query == page.applied && page.count() > 0,
                                 egui::Button::new(if mode == Mode::Duplicates {
                                     "Seleziona extra visibili"
                                 } else {
@@ -165,7 +166,7 @@ impl Lindo {
                     }
                     if ui
                         .add_enabled(
-                            !page.selected.is_empty(),
+                            available && !page.selected.is_empty(),
                             egui::Button::new("Deseleziona tutto"),
                         )
                         .clicked()
@@ -174,24 +175,35 @@ impl Lindo {
                         page.selected_visible = 0;
                         page.selected_bytes = 0;
                     }
-                    if mode != Mode::Duplicates
-                        && ui
-                            .add_enabled(
-                                !page.selected.is_empty() && available,
-                                egui::Button::new("Rivedi la selezione"),
-                            )
-                            .clicked()
-                    {
-                        self.review = Review::snapshot(page);
-                    }
                 });
-                ui.small(format!(
-                    "{} selezionati · {} nascosti dal filtro",
-                    number(page.selected.len()),
-                    number(page.selected.len().saturating_sub(page.selected_visible))
-                ));
             }
         };
+        if mode != Mode::Duplicates && mode != Mode::Space && page.result.is_some() {
+            ui.horizontal_wrapped(|ui| {
+                let count = page.selected.len();
+                if design::primary(ui, &review_action(mode, count), count > 0 && available)
+                    .on_hover_text("Controlla i percorsi e conferma prima di spostarli.")
+                    .clicked()
+                {
+                    self.review = Review::snapshot(page);
+                    self.confirm = self.review.is_some();
+                }
+                if count > 0 {
+                    ui.strong(format!("Totale {}", size(page.selected_bytes)));
+                    let hidden = count.saturating_sub(page.selected_visible);
+                    if hidden > 0 {
+                        ui.small(format!(
+                            "{} {} dal filtro",
+                            number(hidden),
+                            if hidden == 1 { "nascosto" } else { "nascosti" }
+                        ));
+                    }
+                } else {
+                    ui.small("Seleziona gli elementi da rivedere.");
+                }
+            });
+            ui.separator();
+        }
         if compact_scopes {
             let settings_id = ui.id().with("duplicate-options");
             let mut opened = ui
@@ -253,6 +265,11 @@ impl Lindo {
                     });
             }
             ui.data_mut(|d| d.insert_temp(settings_id, opened));
+        } else if page.result.is_some()
+            && mode != Mode::Space
+            && (ctx.screen_rect().height() <= 520. || ui.available_width() < 520.)
+        {
+            ui.collapsing("Impostazioni dell’analisi", |ui| scopes(ui, page));
         } else {
             scopes(ui, page);
         }
@@ -364,13 +381,21 @@ impl Lindo {
             } else {
                 format!("{} copie selezionate", number(count))
             };
-            let action_width = if count == 0 { 208. } else { 168. };
+            let action_width = if count == 0 { 208. } else { 250. };
             let mut left = action_cell(ui, actions, false, "selected", action_width);
             left.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.;
                 ui.add(egui::Label::new(design::display(summary, 17.)).truncate());
-                if hidden > 0 {
-                    ui.small(format!("{} nascoste dal filtro", number(hidden)));
+                if count > 0 {
+                    let mut details = size(page.selected_bytes);
+                    if hidden > 0 {
+                        details.push_str(&format!(
+                            " · {} {} dal filtro",
+                            number(hidden),
+                            if hidden == 1 { "nascosta" } else { "nascoste" }
+                        ));
+                    }
+                    ui.small(details);
                 }
             });
             let mut right = action_cell(ui, actions, true, "review", action_width);
@@ -395,12 +420,7 @@ impl Lindo {
                         }
                     }
                 }
-            } else if design::primary(
-                &mut right,
-                &format!("Rivedi {}", size(page.selected_bytes)),
-                available,
-            )
-            .clicked()
+            } else if design::primary(&mut right, &review_action(mode, count), available).clicked()
             {
                 self.review = Review::snapshot(page).map(|mut review| {
                     // Keep source paths adjacent to retained paths in every group.
@@ -440,6 +460,13 @@ impl Lindo {
             });
         }
         let rows = page.count();
+        if rows == 0 && page.applied == page.query {
+            ui.label(if page.query.is_empty() {
+                "Nessun elemento trovato nell’ambito analizzato."
+            } else {
+                "Nessun elemento corrisponde alla ricerca."
+            });
+        }
         egui::ScrollArea::vertical()
             .id_salt(("risultati", mode))
             .auto_shrink([false, false])
@@ -448,15 +475,17 @@ impl Lindo {
                     let i = page.row_id(row);
                     let item = &r.items[i];
                     let directory = mode == Mode::Space && item.identity.is_dir();
-                    let sense = if directory && available {
+                    let selectable = mode != Mode::Space && available && item.group.and_then(|g| page.keeper(g)) != Some(i);
+                    let mark = ui.painter().add(egui::Shape::Noop);
+                    let sense = if (directory && available) || selectable {
                         egui::Sense::click() - egui::Sense::FOCUSABLE
                     } else { egui::Sense::hover() };
                     let row = ui.scope_builder(egui::UiBuilder::new().id_salt(i).sense(sense), |ui| {
                         ui.set_min_height(48.0);
-                        if directory {
+                        if directory || selectable {
                             ui.set_min_width(ui.available_width());
-                            // Directory details belong to the row hit target. The name
-                            // button remains its keyboard action, and Finder is separate.
+                            // Let non-interactive labels pass clicks through to the row.
+                            // The checkbox, directory button and Finder keep their own targets.
                             ui.style_mut().interaction.selectable_labels = false;
                         }
                         compact_row(ui);
@@ -464,7 +493,7 @@ impl Lindo {
                             if mode != Mode::Space {
                                 let protected = item.group.and_then(|g| page.keeper(g)) == Some(i);
                                 let mut chosen = page.selected.contains(&i);
-                                if crate::extras::file_checkbox(ui, &mut chosen, !protected, &item.path)
+                                if crate::extras::file_checkbox(ui, &mut chosen, !protected && available, &item.path)
                                     .on_hover_text("Seleziona per il Cestino")
                                     .changed()
                                 {
@@ -476,24 +505,14 @@ impl Lindo {
                                 .file_name()
                                 .unwrap_or(item.path.as_os_str())
                                 .to_string_lossy();
-                            let reserve = if mode == Mode::Duplicates {
-                                265.0
-                            } else {
-                                170.0
-                            };
-                            let width = (ui.available_width() - reserve).max(60.0);
-                            if mode == Mode::Space && item.identity.is_dir() {
-                                if ui
-                                    .add_enabled(
-                                        available,
-                                        egui::Button::new(
-                                            egui::RichText::new(name.as_ref()).strong(),
-                                        )
-                                        .truncate(),
-                                    )
-                                    .on_hover_text(item.path.to_string_lossy())
-                                    .clicked()
-                                {
+                            let width = (ui.available_width() - 140.).max(60.);
+                            if directory {
+                                let folder_button = egui::Button::new(
+                                    egui::RichText::new(name.as_ref()).strong(),
+                                ).truncate();
+                                if ui.add_enabled_ui(available, |ui| {
+                                    ui.add_sized([width, 18.], folder_button)
+                                }).inner.on_hover_text(item.path.to_string_lossy()).clicked() {
                                     drill = Some(item.path.clone());
                                 }
                             } else if mode == Mode::Space {
@@ -547,6 +566,16 @@ impl Lindo {
                             .on_hover_text(item.path.to_string_lossy());
                         });
                     });
+                    if selectable {
+                        if row.response.clone().on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            page.select(i, !page.selected.contains(&i));
+                        }
+                        if page.selected.contains(&i) {
+                            ui.painter().set(mark, egui::Shape::rect_filled(
+                                row.response.rect, 5., design::LIME.gamma_multiply(0.16),
+                            ));
+                        }
+                    }
                     if directory && available && row.response.on_hover_cursor(egui::CursorIcon::PointingHand)
                         .on_hover_text(format!("Apri {}",item.path.display())).clicked() {
                         drill=Some(item.path.clone());
@@ -570,13 +599,17 @@ impl Lindo {
         let Some(review) = self.review.as_ref() else {
             return;
         };
-        let direct = self.mode == Some(Mode::Duplicates) && review.req.mode == Mode::Duplicates;
-        let hidden = if direct {
-            let page = &self.pages[&Mode::Duplicates];
+        let origin = self.pages.get(&review.req.mode).filter(|page| {
+            self.mode == Some(review.req.mode)
+                && page
+                    .result
+                    .as_ref()
+                    .is_some_and(|result| Arc::ptr_eq(result, &review.data))
+        });
+        let direct = origin.is_some();
+        let hidden = origin.map_or(0, |page| {
             page.selected.len().saturating_sub(page.selected_visible)
-        } else {
-            0
-        };
+        });
         let compact = ctx.screen_rect().width() <= 700. || ctx.screen_rect().height() <= 500.;
         let padding = if compact { 12 } else { 28 };
         let frame = egui::Frame::new()
@@ -601,7 +634,7 @@ impl Lindo {
             ui.label(design::display(heading, if compact { 23. } else { 32. }));
             let summary = format!("{} · Dimensione logica selezionata {}", item_count(review.moves.len()), size(review.total));
             ui.label(egui::RichText::new(summary).size(17.).color(design::CREAM));
-            if !direct { ui.small(&review.label); }
+            if !direct || review.req.mode != Mode::Duplicates { ui.small(&review.label); }
             if review.allocation.incomplete {
                 ui.label("Stima dopo lo svuotamento non disponibile per tutta la selezione.");
             } else {
@@ -612,7 +645,7 @@ impl Lindo {
             }
             ui.add_space(4.);
             if hidden > 0 {
-                let warning = format!("La selezione include {} nascosti dal filtro.", item_count(hidden));
+                let warning = format!("La selezione include {} {} dal filtro.", item_count(hidden), if hidden == 1 { "nascosto" } else { "nascosti" });
                 ui.colored_label(ui.visuals().warn_fg_color, warning);
             }
             if review.cloud {
@@ -1130,6 +1163,22 @@ fn report_notes(ui: &mut egui::Ui, r: &Report) {
     }
 }
 
+fn review_action(mode: Mode, count: usize) -> String {
+    let noun = match (mode, count) {
+        (Mode::Apps, _) => "app",
+        (Mode::Duplicates, 1) => "copia",
+        (Mode::Duplicates, _) => "copie",
+        (Mode::Logs, _) => "log",
+        (Mode::Cache, _) => "cache",
+        _ => "file",
+    };
+    if count == 0 {
+        "Rivedi per il Cestino".to_owned()
+    } else {
+        format!("Rivedi {} {noun} per il Cestino", number(count))
+    }
+}
+
 fn number(value: impl ToString) -> String {
     let digits = value.to_string();
     let mut result = String::with_capacity(digits.len() + digits.len() / 3);
@@ -1173,6 +1222,153 @@ fn action_cell(
 #[cfg(test)]
 mod layout_tests {
     use super::*;
+
+    #[test]
+    fn cleanup_selection_reviews_visible_and_hidden_paths_before_any_move() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let mut report = Report::default();
+        for index in 0..40 {
+            let path = root.join(format!("sample-{index:02}.bin"));
+            std::fs::write(&path, b"example").unwrap();
+            report.items.push(crate::model::Item {
+                identity: crate::trash::Identity::read(&path).unwrap(),
+                path,
+                bytes: 7,
+                group: None,
+                cloud: false,
+            });
+        }
+        for mode in [Mode::Large, Mode::Cache, Mode::Logs, Mode::Apps] {
+            for (width, height) in [(660., 460.), (980., 700.)] {
+                let ctx = egui::Context::default();
+                ctx.enable_accesskit();
+                design::configure(&ctx);
+                let mut app = Lindo::new(&ctx);
+                app.mode = Some(mode);
+                app.revealing = true; // Suppress native Finder while testing its independent target.
+                let page = app.pages.get_mut(&mode).unwrap();
+                page.req.roots = vec![root.clone()];
+                let result = Arc::new(Results::prepare(
+                    mode,
+                    Report {
+                        items: report.items.clone(),
+                        ..Default::default()
+                    },
+                ));
+                page.install(result.clone());
+                page.select(39, true);
+                let draw = |app: &mut Lindo, events| {
+                    ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width, height),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            egui::SidePanel::left("nav")
+                                .exact_width(160.)
+                                .show(ctx, |_| {});
+                            egui::TopBottomPanel::bottom("status")
+                                .exact_height(24.)
+                                .show(ctx, |_| {});
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                ui.add_space(58.);
+                                ui.add_enabled_ui(app.review.is_none(), |ui| {
+                                    app.section(ui, mode, ctx)
+                                });
+                                app.review_page(ui, ctx);
+                            });
+                        },
+                    )
+                    .platform_output
+                    .accesskit_update
+                    .unwrap()
+                };
+                let click = |app: &mut Lindo, label: &str| {
+                    let _ = draw(app, vec![]);
+                    let tree = draw(app, vec![]);
+                    let bounds = tree
+                        .nodes
+                        .iter()
+                        .filter(|(_, n)| {
+                            n.label() == Some(label)
+                                || n.value() == Some(label)
+                                || (label == "first checkbox"
+                                    && n.role() == egui::accesskit::Role::CheckBox)
+                        })
+                        .filter_map(|(_, n)| n.bounds())
+                        .min_by(|a, b| a.y0.total_cmp(&b.y0))
+                        .unwrap_or_else(|| panic!("{mode:?} {width}: missing {label}"));
+                    assert!(
+                        bounds.x0 >= 160.
+                            && bounds.x1 <= width as f64
+                            && bounds.y1 <= (height - 24.) as f64,
+                        "{mode:?} {width}: {label} outside content {bounds:?}"
+                    );
+                    let pos = egui::pos2(
+                        ((bounds.x0 + bounds.x1) / 2.) as f32,
+                        ((bounds.y0 + bounds.y1) / 2.) as f32,
+                    );
+                    for pressed in [true, false] {
+                        let _ = draw(
+                            app,
+                            vec![
+                                egui::Event::PointerMoved(pos),
+                                egui::Event::PointerButton {
+                                    pos,
+                                    button: egui::PointerButton::Primary,
+                                    pressed,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                            ],
+                        );
+                    }
+                };
+                click(&mut app, "sample-00.bin");
+                assert_eq!(app.pages[&mode].selected, HashSet::from([0, 39]));
+                click(&mut app, "Finder");
+                assert_eq!(app.pages[&mode].selected, HashSet::from([0, 39]));
+                click(&mut app, root.join("sample-00.bin").to_str().unwrap());
+                assert_eq!(app.pages[&mode].selected, HashSet::from([39]));
+                click(&mut app, "first checkbox");
+                assert_eq!(app.pages[&mode].selected, HashSet::from([0, 39]));
+                let page = app.pages.get_mut(&mode).unwrap();
+                page.query = "sample-00".into();
+                app.tx
+                    .send(Event::Filter(
+                        mode,
+                        result.clone(),
+                        "sample-00".into(),
+                        result.filtered(mode, "sample-00"),
+                    ))
+                    .unwrap();
+                app.receive();
+                click(&mut app, &review_action(mode, 2));
+                let review = app.review.as_ref().expect("selection opens review");
+                assert!(app.confirm && !app.cleaning);
+                assert_eq!(review.moves, [0, 39]);
+                assert_eq!(review.total, 14);
+                let _ = draw(&mut app, vec![]);
+                let tree = draw(&mut app, vec![]);
+                assert!(tree.nodes.iter().any(|(_, n)| n
+                    .label()
+                    .or(n.value())
+                    .is_some_and(|s| s.contains("1 elemento nascosto dal filtro"))));
+                assert!(tree
+                    .nodes
+                    .iter()
+                    .any(|(_, n)| n.label() == Some("Sposta nel Cestino")));
+                click(&mut app, "Indietro");
+                assert!(app.review.is_none() && !app.confirm && !app.cleaning);
+                assert_eq!(app.pages[&mode].selected_bytes, 14);
+                assert!(root.join("sample-00.bin").exists() && root.join("sample-39.bin").exists());
+            }
+        }
+    }
 
     #[test]
     fn empty_selection_prompts_for_explicit_group_selection() {
@@ -1275,7 +1471,7 @@ mod layout_tests {
         assert!(after
             .nodes
             .iter()
-            .any(|(_, n)| n.label() == Some("Rivedi 14 B")));
+            .any(|(_, n)| n.label() == Some("Rivedi 2 copie per il Cestino")));
         assert!(after
             .nodes
             .iter()
@@ -1321,7 +1517,7 @@ mod layout_tests {
             .tempdir()
             .unwrap();
         let root = fixture.path().canonicalize().unwrap();
-        let target = root.join("cartella");
+        let target = root.join("cartella-con-un-nome-molto-lungo-".repeat(6));
         std::fs::create_dir(&target).unwrap();
         for hit in ["size", "path", "blank", "finder", "busy", "file"] {
             let is_file = hit == "file";
@@ -1388,9 +1584,10 @@ mod layout_tests {
                 .find(|(_, n)| n.label() == Some(label) || n.value() == Some(label))
                 .and_then(|(_, n)| n.bounds())
                 .unwrap_or_else(|| panic!("Missing {label}"));
+            assert!(bounds.x1 <= 850., "row target must fit for {hit}");
             let pos = egui::pos2(
                 if hit == "blank" {
-                    790.
+                    835.
                 } else {
                     ((bounds.x0 + bounds.x1) * 0.5) as f32
                 },
@@ -1555,14 +1752,14 @@ mod layout_tests {
                 let action = bounds(if modal {
                     "Sposta nel Cestino"
                 } else {
-                    "Rivedi 7 B"
+                    "Rivedi 1 copia per il Cestino"
                 });
                 assert!(action.y1 <= f64::from(bottom) + 1. && action.x1 <= 660.);
                 if modal {
                     assert!(tree.nodes.iter().any(|(_, n)| n
                         .label()
                         .or(n.value())
-                        .is_some_and(|s| s.contains("nascosti dal filtro"))));
+                        .is_some_and(|s| s.contains("nascosto dal filtro"))));
                     assert!(tree.nodes.iter().any(|(_, n)| n
                         .label()
                         .or(n.value())
@@ -1576,7 +1773,7 @@ mod layout_tests {
                     assert!(back.x1 < action.x0);
                 } else {
                     let summary = bounds("1 copia selezionata");
-                    assert!(summary.y0 >= action.y0 - 2. && summary.y1 <= action.y1 + 2.);
+                    assert!(summary.y1 <= action.y1 + 2. && summary.x1 < action.x0);
                 }
             }
         }

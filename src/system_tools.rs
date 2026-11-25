@@ -330,6 +330,7 @@ fn execute(action: Action, cancel: &AtomicBool) -> Result<Report, String> {
 
 type JobResult = Result<Report, String>;
 struct Job {
+    action: Action,
     cancel: Arc<AtomicBool>,
     rx: mpsc::Receiver<JobResult>,
 }
@@ -347,6 +348,7 @@ pub(crate) struct SystemTools {
     monitor: folder_monitor::Monitor,
     job: Option<Job>,
     report: Option<Report>,
+    scan_findings: Vec<security_scan::Finding>,
     message: String,
 }
 impl SystemTools {
@@ -368,6 +370,7 @@ impl SystemTools {
         if !matches!(action, Action::Open(_)) {
             self.report = None;
         }
+        let job_action = action.clone();
         let spawn = std::thread::Builder::new()
             .name("lindo-system".into())
             .spawn(move || {
@@ -375,7 +378,13 @@ impl SystemTools {
                 repaint.request_repaint();
             });
         match spawn {
-            Ok(_) => self.job = Some(Job { cancel, rx }),
+            Ok(_) => {
+                self.job = Some(Job {
+                    action: job_action,
+                    cancel,
+                    rx,
+                })
+            }
             Err(e) => self.message = format!("Impossibile avviare il controllo: {e}"),
         }
     }
@@ -400,10 +409,18 @@ impl SystemTools {
                 Err(mpsc::TryRecvError::Disconnected) => Some(Err("Operazione interrotta.".into())),
             };
             if let Some(result) = received {
-                self.job = None;
+                let job = self.job.take().unwrap();
                 match result {
                     Ok(r) if r.opened => self.message = r.text,
-                    Ok(r) => {
+                    Ok(mut r) => {
+                        match &job.action {
+                            Action::Scan(_) => self.scan_findings = std::mem::take(&mut r.findings),
+                            Action::Maintenance(Mutation::Detected(done)) => {
+                                self.scan_findings.retain(|finding| finding != done);
+                                self.monitor.resolve(done);
+                            }
+                            _ => {}
+                        }
                         self.report = Some(r);
                         self.message.clear();
                     }
@@ -447,6 +464,18 @@ impl SystemTools {
             self.report = None;
         }
         ui.separator();
+        if let Some(job) = &self.job {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                if ui.button("Annulla").clicked() {
+                    job.cancel.store(true, Ordering::Release);
+                }
+            });
+            ctx.request_repaint_after(Duration::from_millis(180));
+        }
+        if !self.message.is_empty() {
+            ui.label(&self.message);
+        }
         egui::ScrollArea::vertical().id_salt("system_scroll").show(ui, |ui| {
             match self.section {
                 Section::Storage => {
@@ -520,8 +549,10 @@ impl SystemTools {
                     ui.add_enabled_ui(!self.file.is_empty(), |ui| {
                         self.button(ui,ctx,"Avvia scansione",Action::Scan(self.file.as_str().into()));
                     });
-                    let mut findings=self.report.as_ref().map(|r|r.findings.clone()).unwrap_or_default();
-                    findings.extend(self.monitor.show(ui,ctx,&self.file));
+                    let mut findings=self.scan_findings.clone();
+                    for finding in self.monitor.show(ui,ctx,&self.file) {
+                        if !findings.contains(&finding) { findings.push(finding); }
+                    }
                     for finding in findings {
                         ui.label(finding.path.display().to_string());
                         ui.horizontal_wrapped(|ui| {
@@ -544,14 +575,6 @@ impl SystemTools {
                     }
                 }
             }
-            if let Some(job) = &self.job {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    if ui.button("Annulla").clicked() { job.cancel.store(true,Ordering::Release); }
-                });
-                ctx.request_repaint_after(Duration::from_millis(180));
-            }
-            if !self.message.is_empty() { ui.label(&self.message); }
             if let Some(report) = &self.report {
                 ui.separator();
                 ui.add(egui::Label::new(egui::RichText::new(&report.text).monospace()).wrap().selectable(true));
